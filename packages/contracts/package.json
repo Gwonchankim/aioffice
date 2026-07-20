@@ -1,0 +1,14 @@
+{
+  "name": "@orion/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "vitest run --config ../../vitest.config.ts",
+    "test:coverage": "vitest run --coverage --config ../../vitest.config.ts"
+  },
+  "dependencies": {
+    "zod": "^3.24.3"
+  }
+}

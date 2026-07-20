@@ -1,0 +1,32 @@
+{
+  "name": "@orion/root",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.15.1",
+  "engines": {
+    "node": ">=24 <25",
+    "pnpm": ">=11 <12"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "format:check": "prettier --check --ignore-unknown .",
+    "typecheck": "pnpm -r --if-present run typecheck",
+    "test": "pnpm -r --if-present run test",
+    "test:coverage": "vitest run --coverage",
+    "build": "pnpm -r --if-present run build",
+    "e2e:install": "pnpm exec playwright install chromium",
+    "e2e": "pnpm exec playwright test",
+    "dev": "pnpm --filter @orion/scripts dev",
+    "start": "pnpm --filter @orion/server start"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.24.0",
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^3.1.2",
+    "eslint": "^9.24.0",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.30.0",
+    "vitest": "^3.1.2"
+  }
+}
