@@ -92,6 +92,12 @@ importers:
 
   packages/test-fixtures: {}
 
+  scripts:
+    dependencies:
+      '@orion/server':
+        specifier: workspace:*
+        version: link:../apps/server
+
 packages:
 
   '@ampproject/remapping@2.3.0':

@@ -10,6 +10,7 @@ import { ApplicationError, getErrorCode } from './errors.js';
 import { createLogger, type StartupLogger } from './logger.js';
 import { type PortBinder, SequentialPortBinder } from './port.js';
 import { NodeRuntimeFileSystem, type RuntimeFileSystem } from './runtime.js';
+export { createLogger, type StartupLogger } from './logger.js';
 
 export interface StartedServer {
   readonly app: FastifyInstance;

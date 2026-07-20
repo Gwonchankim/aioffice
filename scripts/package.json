@@ -1,0 +1,17 @@
+{
+  "name": "@orion/scripts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter @orion/server build && tsc --project tsconfig.json && node dist/coordinator.js",
+    "start": "pnpm --filter @orion/server build && tsc --project tsconfig.json && node dist/start.js",
+    "typecheck": "pnpm --filter @orion/server build && tsc --project tsconfig.json --noEmit",
+    "test": "pnpm --filter @orion/server build && vitest run --config ../vitest.config.ts scripts/test",
+    "test:coverage": "pnpm --filter @orion/server build && vitest run --coverage --config ../vitest.config.ts",
+    "build": "pnpm --filter @orion/server build && tsc --project tsconfig.json"
+  },
+  "dependencies": {
+    "@orion/server": "workspace:*"
+  }
+}

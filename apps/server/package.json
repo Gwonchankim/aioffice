@@ -3,6 +3,12 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/main.d.ts",
+      "default": "./dist/main.js"
+    }
+  },
   "scripts": {
     "start": "node dist/main.js",
     "typecheck": "pnpm --filter @orion/contracts build && tsc --project tsconfig.json --noEmit",
