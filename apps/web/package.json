@@ -1,0 +1,25 @@
+{
+  "name": "@orion/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "pnpm --filter @orion/contracts build && vite build",
+    "typecheck": "pnpm --filter @orion/contracts build && tsc --project tsconfig.json --noEmit",
+    "test": "pnpm --filter @orion/contracts build && vitest run --config ../../vitest.config.ts",
+    "test:coverage": "pnpm --filter @orion/contracts build && vitest run --coverage --config ../../vitest.config.ts"
+  },
+  "dependencies": {
+    "@orion/contracts": "workspace:*",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.0",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "happy-dom": "^17.6.3",
+    "vite": "^6.3.5"
+  }
+}
