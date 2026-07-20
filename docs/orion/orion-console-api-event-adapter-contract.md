@@ -83,18 +83,36 @@
 
 #### `GET /api/v1/health`
 
-```json
-{
-  "data": {
-    "status": "degraded",
-    "database": "not_initialized",
-    "scheduler": {"status": "not_initialized"},
-    "resources": {"memoryPercent": 62.1, "freeDiskBytes": 123456789},
-    "retention": {"status": "not_initialized"}
-  },
-  "meta": {"requestId": "01...", "timestamp": "..."}
+성공 응답은 공통 `{ data, meta }` envelope를 유지하며 HTTP `200`이다. 전체 상태 enum은 `"healthy" | "degraded" | "unhealthy"`이고, `database`, `scheduler.status`, `retention.status` enum은 각각 `"ok" | "not_initialized" | "error"`이다.
+
+```ts
+interface HealthSuccess {
+  data: {
+    status: "healthy" | "degraded" | "unhealthy";
+    database: "ok" | "not_initialized" | "error";
+    scheduler: {
+      status: "ok" | "not_initialized" | "error";
+      active: number; // 0 이상의 정수
+      capacity: number; // 0 이상의 정수
+      queued: number; // 0 이상의 정수
+    };
+    resources: {
+      memoryPercent: number; // 유한한 0..100 값
+      freeDiskBytes: number; // 0 이상의 safe integer
+    };
+    retention: {
+      lastRunAt: string | null; // UTC ISO 8601 또는 아직 실행되지 않은 null
+      status: "ok" | "not_initialized" | "error";
+    };
+  };
+  meta: {
+    requestId: string; // ULID
+    timestamp: string; // UTC ISO 8601
+  };
 }
 ```
+
+M0의 truthfully degraded 응답은 항상 `data.status: "degraded"`, `database: "not_initialized"`, `scheduler: { status: "not_initialized", active: 0, capacity: 0, queued: 0 }`, `retention: { lastRunAt: null, status: "not_initialized" }`를 사용한다. `resources`만 요청 시 실제 측정값을 반환한다. `healthy`는 필요한 초기화된 하위 시스템이 모두 `ok`일 때만 가능하고, `degraded`는 `not_initialized` 또는 치명적이지 않은 오류가 있는 상태이며, `unhealthy`는 필수 상태를 안정적으로 제공하거나 측정할 수 없는 상태다. M0에는 Arca를 포함한 M1 운영 하위 시스템이 없으므로 이를 `ok` 또는 운영 중으로 표시하지 않는다.
 
 #### `GET /api/v1/providers`
 

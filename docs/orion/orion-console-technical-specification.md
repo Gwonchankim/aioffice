@@ -4,7 +4,7 @@
 > 작성일: 2026-07-20  
 > 구현 대상: `outputs/orion-console`  
 > 관련 문서: `orion-console-prd.md`  
-> 기준 환경: Windows 11, Node.js 24.16.0, pnpm 11.9.0, Codex CLI 0.138.0, Claude Code 2.1.156
+> 기준 환경: Windows 11, Node.js 24.16.0, pnpm 11.15.1, Codex CLI 0.138.0, Claude Code 2.1.156
 
 ## 1. 문서 목적
 
@@ -139,6 +139,7 @@ CLI는 서버의 자식 프로세스로 실행한다. 서버가 재시작되면 
 ### 5.2 Web Process
 
 개발 모드에서는 Vite 개발 서버를 사용한다. 제품 모드에서는 Fastify가 빌드된 정적 SPA를 제공한다. 앱은 빈 포트에서 시작하되 기본 포트는 `4317`이며, 충돌 시 `4318`부터 순차 탐색해 브라우저를 연다.
+M0 제품 모드에서는 `apps/web/dist`를 Fastify가 제공하고, REST base path는 `/api/v1`이다. `/api/v1/*`는 API가 먼저 처리하며, 비 API 탐색 요청만 SPA fallback으로 `index.html`을 반환한다. M0의 `GET /api/v1/health`는 DB·scheduler·retention이 아직 구현되지 않았음을 `not_initialized`로 정직하게 표시한다.
 
 ### 5.3 패키지 의존 방향
 
@@ -363,13 +364,15 @@ SSE `id`는 RunEvent sequence를 사용한다. 브라우저 재연결 시 `Last-
 
 ## 8. REST 및 SSE 인터페이스
 
+모든 REST endpoint의 base path는 `/api/v1`이다.
+
 ### 8.1 시스템·공급자
 
 | Method | Path | 동작 |
 |---|---|---|
-| GET | `/api/health` | 서버·DB·디스크 상태 |
-| GET | `/api/providers` | CLI 설치 경로, 버전, 로그인, 모델 상태 |
-| POST | `/api/providers/refresh` | 공급자 상태 재검사 |
+| GET | `/api/v1/health` | 서버·DB·디스크 상태 |
+| GET | `/api/v1/providers` | CLI 설치 경로, 버전, 로그인, 모델 상태 |
+| POST | `/api/v1/providers/refresh` | 공급자 상태 재검사 |
 
 공급자 상태에는 토큰, 이메일, 조직 ID 같은 계정 식별정보를 반환하지 않는다.
 
@@ -377,34 +380,34 @@ SSE `id`는 RunEvent sequence를 사용한다. 브라우저 재연결 시 `Last-
 
 | Method | Path | 동작 |
 |---|---|---|
-| GET | `/api/projects` | 등록 프로젝트 목록 |
-| POST | `/api/projects` | 프로젝트 검증·등록 |
-| GET | `/api/projects/:id` | 프로젝트 상세·Git 상태 |
-| PATCH | `/api/projects/:id` | 정책·브랜치·자료 등급 수정 |
-| DELETE | `/api/projects/:id` | 실행 중 과제가 없을 때 등록만 해제 |
+| GET | `/api/v1/projects` | 등록 프로젝트 목록 |
+| POST | `/api/v1/projects` | 프로젝트 검증·등록 |
+| GET | `/api/v1/projects/:id` | 프로젝트 상세·Git 상태 |
+| PATCH | `/api/v1/projects/:id` | 정책·브랜치·자료 등급 수정 |
+| DELETE | `/api/v1/projects/:id` | 실행 중 과제가 없을 때 등록만 해제 |
 
 ### 8.3 프로필
 
 | Method | Path | 동작 |
 |---|---|---|
-| GET | `/api/agents` | 현재 활성 프로필 목록 |
-| GET | `/api/agents/:id/versions` | 버전 이력 |
-| POST | `/api/agents/:id/versions` | 새 버전 생성 |
-| POST | `/api/agents/import` | JSON/YAML 검증·가져오기 |
-| GET | `/api/agents/export?format=json|yaml` | 현재 프로필 내보내기 |
+| GET | `/api/v1/agents` | 현재 활성 프로필 목록 |
+| GET | `/api/v1/agents/:id/versions` | 버전 이력 |
+| POST | `/api/v1/agents/:id/versions` | 새 버전 생성 |
+| POST | `/api/v1/agents/import` | JSON/YAML 검증·가져오기 |
+| GET | `/api/v1/agents/export?format=json|yaml` | 현재 프로필 내보내기 |
 
 ### 8.4 과제·실행
 
 | Method | Path | 동작 |
 |---|---|---|
-| GET | `/api/tasks` | 필터·페이지 기반 과제 목록 |
-| POST | `/api/tasks` | draft 과제 생성 |
-| POST | `/api/tasks/:id/plan` | Orion 계획 생성·검증 |
-| POST | `/api/tasks/:id/start` | 유효 계획 실행 |
-| POST | `/api/tasks/:id/cancel` | 준비·실행 단계 취소 |
-| POST | `/api/tasks/:id/retry` | 실패 단계 또는 전체 재시도 |
-| GET | `/api/tasks/:id` | 계획·단계·실행·산출물 요약 |
-| GET | `/api/tasks/:id/events` | SSE 이벤트 스트림 |
+| GET | `/api/v1/tasks` | 필터·페이지 기반 과제 목록 |
+| POST | `/api/v1/tasks` | draft 과제 생성 |
+| POST | `/api/v1/tasks/:id/plan` | Orion 계획 생성·검증 |
+| POST | `/api/v1/tasks/:id/start` | 유효 계획 실행 |
+| POST | `/api/v1/tasks/:id/cancel` | 준비·실행 단계 취소 |
+| POST | `/api/v1/tasks/:id/retry` | 실패 단계 또는 전체 재시도 |
+| GET | `/api/v1/tasks/:id` | 계획·단계·실행·산출물 요약 |
+| GET | `/api/v1/tasks/:id/events` | SSE 이벤트 스트림 |
 
 모든 명령 POST는 `Idempotency-Key`를 요구한다. 동일 key와 body hash는 이전 결과를 반환하고, 다른 body는 409로 거절한다.
 
@@ -412,11 +415,11 @@ SSE `id`는 RunEvent sequence를 사용한다. 브라우저 재연결 시 `Last-
 
 | Method | Path | 동작 |
 |---|---|---|
-| GET | `/api/approvals` | 승인 대기·처리 목록 |
-| POST | `/api/approvals/:id/approve` | 승인 후 좁은 서버 액션 큐 등록 |
-| POST | `/api/approvals/:id/reject` | 사유와 함께 거절 |
-| GET | `/api/artifacts/:id` | 권한·만료 검사 후 다운로드 |
-| DELETE | `/api/tasks/:id/data` | 과제 로그·산출물 즉시 삭제 |
+| GET | `/api/v1/approvals` | 승인 대기·처리 목록 |
+| POST | `/api/v1/approvals/:id/approve` | 승인 후 좁은 서버 액션 큐 등록 |
+| POST | `/api/v1/approvals/:id/reject` | 사유와 함께 거절 |
+| GET | `/api/v1/artifacts/:id` | 권한·만료 검사 후 다운로드 |
+| DELETE | `/api/v1/tasks/:id/data` | 과제 로그·산출물 즉시 삭제 |
 
 ## 9. 에이전트 카탈로그와 모델 라우팅
 
@@ -861,8 +864,7 @@ Authorization은 broad query 뒤 filtering하지 않고 requester role, project 
 
 ### 17.3 Health
 
-`/api/health`는 다음을 반환한다.
-M0 health는 `degraded`이며 database, scheduler, retention을 모두 `not_initialized`로 보고하고 Arca를 운영 상태로 표시하지 않는다. 아래 항목은 M1+ 운영 목표다.
+`GET /api/v1/health`는 공통 `{ data, meta }` envelope를 반환한다. M0에서는 전체 상태가 `degraded`이고 database, scheduler, retention은 모두 `not_initialized`다. scheduler의 `active`, `capacity`, `queued`는 모두 `0`이며 retention의 `lastRunAt`은 `null`이다. resources만 실제 측정값을 반환하고 Arca를 운영 상태로 표시하지 않는다. 아래 항목은 M1+ 운영 목표다.
 
 - DB read/write 가능 여부
 - runtime·artifact·worktree 디스크 상태

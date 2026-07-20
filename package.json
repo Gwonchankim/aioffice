@@ -20,7 +20,9 @@
     "start": "pnpm --filter @orion/scripts start"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@eslint/js": "^9.24.0",
+    "@playwright/test": "^1.61.1",
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "^3.1.2",
     "eslint": "^9.24.0",
