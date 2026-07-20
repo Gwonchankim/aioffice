@@ -1,0 +1,401 @@
+# Orion Console Operations, Recovery & Troubleshooting Runbook
+
+> 문서 버전: 1.0  
+> 작성일: 2026-07-20  
+> 대상: 로컬 단일 사용자·Windows 운영
+
+## 1. 운영 범위
+
+이 문서는 Orion Console의 설치, 시작·종료, 공급자 상태, 백업·복원, 중단 작업, Git worktree, 보존·삭제, 장애 대응과 제거 절차를 정의한다.
+
+## 2. 요구 환경
+
+| 구성 | 기준 |
+|---|---|
+| OS | Windows 11 |
+| Node.js | 24.x |
+| pnpm | 11.x |
+| Git | 지원되는 최신 stable |
+| Codex CLI | 기준 0.138.0 이상, capability probe 통과 |
+| Claude Code | 기준 2.1.156 이상, stream-json/json-schema 지원 |
+| Memory | 16GB 이상 권장 |
+| Free disk | write run 시작 시 최소 10GB |
+
+두 CLI는 현재 Windows 사용자 계정으로 로그인되어 있어야 한다. 앱은 token을 저장하지 않는다.
+
+## 3. 설치·개발 실행
+
+```powershell
+pnpm install --frozen-lockfile
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm start
+```
+
+제품 서버는 기본 `127.0.0.1:4317`을 사용하고 충돌 시 다음 포트를 찾은 뒤 브라우저를 자동으로 연다.
+
+개발:
+
+```powershell
+pnpm dev
+```
+
+실제 provider smoke는 기본 검증에 포함하지 않는다.
+
+```powershell
+$env:ORION_REAL_PROVIDER_TESTS='1'
+pnpm test:providers
+Remove-Item Env:ORION_REAL_PROVIDER_TESTS
+```
+
+## 4. Runtime 위치
+
+```text
+%LOCALAPPDATA%\OrionConsole\
+  orion.db
+  logs\
+  artifacts\
+  worktrees\
+  schemas\
+  exports\
+  backups\
+  runtime.json
+```
+
+소스 저장소와 runtime data를 혼합하지 않는다. runtime directory를 Git에 추가하지 않는다.
+
+## 5. 정상 시작 점검
+
+시작 순서:
+
+1. single instance lock
+2. runtime path·disk check
+3. DB open·migration
+4. interrupted state recovery
+5. CLI path·version·login check
+6. loopback bind
+7. browser bootstrap
+8. scheduler·retention 시작
+
+운영자는 Dashboard에서 다음이 정상인지 확인한다.
+
+- 서버·DB healthy
+- Codex authenticated
+- Claude authenticated
+- active slots 0/8 또는 예상 값
+- free disk 10GB 이상
+- retention last run 성공
+- pending security alert 없음
+
+## 6. 정상 종료
+
+UI의 시스템 종료 또는 서버에 graceful shutdown을 사용한다.
+
+1. 새 task·run 시작 중지
+2. active process cancel 또는 설정된 grace period 대기
+3. event flush
+4. SQLite checkpoint
+5. runtime lock 해제
+
+터미널 창을 강제로 닫은 경우 다음 시작에서 active run이 interrupted로 복구된다.
+
+## 7. 공급자 문제 해결
+
+### 7.1 Codex 미설치
+
+증상: Provider status `not_installed`.
+
+조치:
+
+- `Get-Command codex` 확인
+- `codex --version` 확인
+- 설치 후 앱의 `공급자 상태 다시 확인` 실행
+
+### 7.2 Codex 로그인 만료
+
+증상: `PROVIDER_AUTH_REQUIRED`.
+
+조치:
+
+- 터미널에서 `codex login status`
+- 필요한 로그인 절차 수행
+- 앱에서 provider refresh
+- 실패 step만 재시도
+
+### 7.3 Claude 로그인 만료
+
+증상: Claude provider auth failure.
+
+조치:
+
+- `claude auth status`
+- Claude Code 로그인 복구
+- provider refresh
+- 실패 step 재시도
+
+### 7.4 Unsupported CLI version
+
+증상: 필수 flag probe 실패 또는 unknown protocol event 반복.
+
+조치:
+
+- provider를 write disabled로 유지
+- version과 `--help` 확인
+- adapter fixture와 mapping 갱신
+- read-only smoke 통과 후 write 재활성화
+
+### 7.5 Rate limit·overload
+
+앱이 30초·120초 backoff와 모델 fallback을 자동 처리한다. 반복되면:
+
+- 대기 queue와 provider별 active 수 확인
+- concurrency를 일시적으로 낮춤
+- 모델 fallback 이력 확인
+- auth error와 혼동하지 않음
+
+## 8. Task 장애 대응
+
+### 8.1 Stalled
+
+120초 event 없음은 stalled 표시일 뿐 즉시 실패가 아니다.
+
+- provider process 존재 여부 확인
+- CPU·network·provider 상태 확인
+- run timeout 전에는 불필요한 강제 종료를 피함
+- 사용자가 취소하면 부분 artifact·worktree를 보존
+
+### 8.2 Task limit reached
+
+120분 또는 60 run 도달 시:
+
+- 새 run이 시작되지 않는다.
+- 성공·실패·미실행 step을 확인한다.
+- 범위를 줄인 새 task를 만들거나 한도를 변경한 새 task를 생성한다.
+- 기존 task 한도를 소급 확대하지 않는다.
+
+### 8.3 Plan validation failed
+
+- validator 오류 목록 확인
+- Orion 재계획 2회 결과 확인
+- unknown agent·권한·필수 QA·cycle을 수정
+- 사용자 수동 plan 수정 후 재검증
+
+### 8.4 Model fallback exhausted
+
+- 자료 등급·provider policy가 fallback을 차단했는지 확인
+- provider auth·model availability 확인
+- 정책을 임의 완화하지 말고 profile 새 version 또는 사용자 승인을 통해 변경
+
+## 9. 서버 중단 복구
+
+재시작 시 앱은 다음을 수행한다.
+
+- DB상 running인데 PID가 없는 run→interrupted
+- read-only run + session ID→resume 후보
+- write run→worktree 검사 recovery step
+- dirty integration→자동 정리·재개 금지
+- pending approval→상태 유지, expiry 연장 없음
+
+운영자 체크:
+
+- interrupted run 목록
+- worktree dirty/untracked/unmerged 상태
+- session resume 가능 여부
+- 중복 active run이 없는지
+- 외부 action이 executed인지 queued인지
+
+중복 가능성이 있으면 scheduler를 중지하고 audit log와 action hash를 확인한다.
+
+## 10. Git Worktree 복구
+
+### 10.1 상태 확인
+
+UI Worktrees 탭 또는 다음 read-only 명령을 사용한다.
+
+```powershell
+git -C <repository> worktree list --porcelain
+git -C <worktree> status --short --branch
+git -C <worktree> log -1 --oneline
+```
+
+### 10.2 Dirty agent worktree
+
+- 자동 삭제하지 않는다.
+- 해당 run의 artifact·log와 status를 연결한다.
+- 같은 agent recovery run이 변경을 검토해 commit 또는 needs_attention으로 처리한다.
+
+### 10.3 Integration conflict
+
+- conflicted file·cherry-pick 상태 확인
+- Archon 자동 해결 최대 2회 기록 확인
+- 수동 해결 시 app 밖에서 branch를 바꾸지 말고 해당 integration worktree에서 처리
+- 해결 후 Verify 검증을 다시 실행
+
+### 10.4 Orphan worktree
+
+DB에 없지만 app runtime root 안에 있는 worktree는 자동 삭제하지 않는다.
+
+- Git metadata와 commit 확인
+- 관련 task/run을 찾음
+- 소유권을 확인한 후 UI에서 adopt 또는 보존·정리 결정
+
+## 11. DB 백업
+
+### 11.1 백업 시점
+
+- 앱 upgrade·migration 전
+- 정기 주 1회
+- SEV-1/2 사건 직후 변경 전
+
+### 11.2 백업 내용
+
+- SQLite online backup 또는 checkpoint 후 DB copy
+- profile export
+- audit log
+- 중요 artifact manifest
+
+worktree 전체는 기본 DB backup에 포함하지 않는다. 미통합 commit은 Git bundle 또는 해당 worktree 보존으로 별도 관리한다.
+
+### 11.3 검증
+
+- backup SHA-256 기록
+- 별도 임시 runtime에서 DB open·migration dry check
+- project canonical path가 현재 환경에 존재하는지 report
+
+## 12. DB 복원
+
+1. Orion Console 종료
+2. 현재 runtime DB와 logs를 별도 incident backup으로 보존
+3. 선택 backup checksum 확인
+4. DB 복원
+5. app 시작 전에 migration dry check
+6. app 시작, provider·project·worktree health 검사
+7. running 상태는 자동으로 interrupted 처리
+8. 외부 approval executed history를 확인한 후 scheduler 활성화
+
+복원으로 task 기록이 과거로 돌아가도 이미 수행된 외부 action을 재실행하지 않는다. ExternalActionHandler는 remote target과 action hash를 추가 검증한다.
+
+## 13. 보존·즉시 삭제
+
+### 13.1 자동 정책
+
+- task event·prompt·artifact·usage: 완료 후 90일
+- app worktree: 완료 후 7일, 미통합 변경 제외
+- profile version·project·audit: 사용자 삭제 전까지
+
+### 13.2 즉시 삭제
+
+- active task이면 먼저 cancel·process 종료
+- 삭제 preview에서 DB rows, artifact, worktree 후보 표시
+- 미통합 worktree는 별도 확인 없이 삭제하지 않음
+- delete operation ID와 결과를 audit에 기록
+
+### 13.3 삭제 실패
+
+- 일부 파일 잠금·권한 오류를 retry queue에 저장
+- 성공한 대상은 다시 삭제하지 않음
+- 24시간 반복 실패 시 운영 경고
+
+## 14. Resource 문제
+
+### Memory
+
+- 80% 이상 또는 free <2GB면 새 run 지연
+- active slot을 8→4→2로 수동 낮출 수 있음
+- 기존 run은 자동 종료하지 않음
+
+### Disk
+
+- free <10GB면 새 write worktree 차단
+- 만료 artifact와 안전한 완료 worktree 정리
+- 사용자 저장소·미통합 worktree를 정리 대상으로 사용하지 않음
+
+### Event DB 성장
+
+- task별 event 수와 DB size 확인
+- 90일 retention 상태 확인
+- VACUUM은 active run이 없고 backup 후 수행
+
+## 15. 승인·외부 행동 장애
+
+- approval 만료: 새 요청 생성
+- target SHA 변경: 기존 승인 폐기, 새 diff·승인
+- action 실행 실패: 같은 approval을 자동 반복하지 않음
+- 결과 불명확: remote 상태를 read-only 확인한 후 executed/failed 결정
+- 중복 의심: scheduler·ExternalActionHandler 중지, action hash와 remote 상태 조사
+
+## 16. 보안 사건 Runbook
+
+### SEV-1 즉시 조치
+
+1. scheduler pause
+2. 모든 child process cancel
+3. ExternalActionHandler disable
+4. DB·audit·log·worktree metadata backup
+5. 사용자에게 사건 종류·영향 표시
+6. 기준 저장소와 remote 상태 확인
+7. 원인 수정·보안 검증 전 write run 금지
+
+### Secret 노출
+
+- 노출 위치와 기간 확인
+- 관련 token을 공급자에서 폐기·재발급
+- 보존 log·artifact 즉시 삭제
+- masker fixture와 회귀 테스트 추가
+
+### Controlled data 전송 의심
+
+- provider run·task 즉시 중지
+- 어떤 자료가 어떤 provider에 전송되었는지 audit metadata 확인
+- 관련 조직 보안·법무 절차로 에스컬레이션
+- 자동 로그 삭제 전에 증거 보존 정책 확인
+
+## 17. Update
+
+1. release notes와 ADR·migration 확인
+2. DB·profile export backup
+3. active task 없음 확인
+4. clean install·test·build
+5. 새 version 시작, migration 수행
+6. provider capability probe와 read-only smoke
+7. project·profile·task history 검사
+8. write run 하나를 임시 저장소에서 검증
+
+실패 시 이전 code와 DB backup을 함께 복원한다. worktree는 삭제하지 않는다.
+
+## 18. Uninstall
+
+- application code 제거와 runtime data 제거를 분리한다.
+- 기본 uninstall은 runtime DB·artifact·worktree를 보존한다.
+- 전체 데이터 삭제는 preview·backup 여부·미통합 worktree를 확인한다.
+- CLI 로그인·Git credentials는 Orion Console 소유가 아니므로 삭제하지 않는다.
+- 등록 프로젝트 자체는 삭제하지 않는다.
+
+## 19. 운영 체크리스트
+
+### 매 시작
+
+- [ ] DB healthy
+- [ ] Codex·Claude authenticated
+- [ ] free disk·memory 정상
+- [ ] interrupted run·pending approval 확인
+- [ ] retention 최근 성공
+
+### 주간
+
+- [ ] DB backup·restore verification
+- [ ] orphan·dirty worktree 확인
+- [ ] provider version 변경 확인
+- [ ] failed retention·security alert 확인
+- [ ] 모델 fallback·rate limit 추세 확인
+
+### 릴리스 전
+
+- [ ] active task 0
+- [ ] DB·profile backup
+- [ ] migration·rollback 기준 검토
+- [ ] 전체 test·E2E·security 통과
+- [ ] provider smoke
+- [ ] 임시 저장소 write workflow
+

@@ -1,0 +1,75 @@
+# Local AI session and task state
+.gjc/
+.orion/
+
+# Dependencies and package-manager state
+node_modules/
+.pnpm-store/
+
+# Build and generated output
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Test and coverage output
+coverage/
+playwright-report/
+blob-report/
+test-results/
+.junit/
+
+# Orion runtime data (runtime belongs outside the repository)
+runtime/
+.orion-runtime/
+logs/
+artifacts/
+exports/
+backups/
+schemas/
+worktrees/
+.worktrees/
+*.log
+*.pid
+runtime.json
+
+# SQLite runtime databases and journals
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-shm
+*.sqlite3-wal
+
+# Environment and secret files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.secret
+
+# Temporary files
+.tmp/
+tmp/
+temp/
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# OS and editor state
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
