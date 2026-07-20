@@ -1,0 +1,19 @@
+{
+  "name": "@orion/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node dist/main.js",
+    "typecheck": "pnpm --filter @orion/contracts build && tsc --project tsconfig.json --noEmit",
+    "test": "pnpm --filter @orion/contracts build && vitest run --config ../../vitest.config.ts",
+    "test:coverage": "pnpm --filter @orion/contracts build && vitest run --coverage --config ../../vitest.config.ts",
+    "build": "pnpm --filter @orion/contracts build && tsc --project tsconfig.json"
+  },
+  "dependencies": {
+    "@orion/contracts": "workspace:*",
+    "fastify": "^5.3.2",
+    "pino": "^9.7.0",
+    "ulid": "^2.3.0"
+  }
+}

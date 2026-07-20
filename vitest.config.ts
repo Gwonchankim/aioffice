@@ -23,7 +23,7 @@ const coverageThresholds = Object.fromEntries(
 export default defineConfig({
   root: workspaceRoot,
   test: {
-    include: ['packages/*/test/**/*.test.ts'],
+    include: ['packages/*/test/**/*.test.ts', 'apps/*/test/**/*.test.ts'],
     coverage: {
       provider: 'v8',
       all: true,
