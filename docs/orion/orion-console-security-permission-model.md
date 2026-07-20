@@ -86,6 +86,7 @@ flowchart TB
 - import artifact가 더 높은 분류를 요구하면 task를 중지하고 project 분류 변경을 요청한다.
 - controlled project는 메타데이터만 등록하고 Plan·Start API를 거부한다.
 - 분류 변경은 실행 중 task가 없을 때만 가능하다.
+- `restricted`는 분류 enum이 아니다. 해당 입력은 묵시적으로 변환하지 않고 사용자가 `controlled`을 명시적으로 선택해야 한다.
 
 ### 5.2 기밀 프로젝트
 
@@ -93,6 +94,16 @@ flowchart TB
 - Fable은 공식적으로 30일 data retention이 적용되고 zero data retention 대상이 아니므로 기본 차단한다. `allowFable=true`와 별도 경고 확인 없이는 사용하지 않는다.
 - 웹 조회는 step별 명시적 설정이 없으면 차단한다.
 - prompt와 raw log 화면은 민감정보 경고를 표시한다.
+
+### 5.3 미래 Arca 지식 레지스트리 보안 계약 (M1/M2)
+
+이 절은 M1/M2에서 강제할 미래 보안 계약을 M0에 문서화한 것이다. M0에는 Arca runtime, registry DB/search/connector/excerpt/audit enforcement, profile execution 또는 health 운영 상태가 없다. 레지스트리의 `DataClassification`은 정확히 `public`, `internal`, `confidential`, `controlled` 네 값뿐이다.
+
+**인가와 비공개.** Authorization은 broad search 뒤 결과를 걸러서는 안 된다. requester role, project scope, purpose, classification, `allowedRoles`를 query-time predicate로 candidate 생성 전에 적용한다. source existence, `sourceId`, title, summary, owner, locator, classification, version, tags는 protected metadata이며, 인가되지 않은 caller에게 공개하지 않는다. source-specific lookup, bounded excerpt, lifecycle/detail, SourceRequest resolution, Nexus/specialist source invocation에서 invisible/unauthorized source와 nonexistent source는 동일한 `404 NOT_FOUND` 또는 Agent `missing`으로 정규화하고 모든 protected field를 생략한다. invisible-only search와 no-match search도 동일한 `items: []` envelope를 반환하며 count, facet, source-derived cursor를 넣지 않는다. `PERMISSION_DENIED`는 source, query, candidate, connector, SourceRequest를 검사하기 전의 source-independent missing registry-scope precondition에만 사용할 수 있다. 같은 non-disclosing path는 bounded response budget을 사용하고 candidate-specific connector/excerpt read, metadata hydration, count, response-size 또는 timing branch를 만들지 않으며 SourceRequest·상태 변경·notification을 자동 생성하지 않는다.
+
+**권한 상한과 source 경계.** `knowledge-registry`는 default-deny upper-bound template이고 effective permission은 System policy → Project policy → template/profile → step execution mode의 교집합이다. local-folder와 registered-git connector만 system-owned read-only adapter를 통해 허용할 수 있으며 Drive/NAS, arbitrary network endpoint, repository write, source file delete/move/rename, permission change, classification downgrade, external share는 허용하지 않는다. 각 connector는 canonical absolute path와 symlink/junction resolution 후 registered allowed root containment를 확인하고 relative path, `..`, device path, UNC path, symlink/junction escape를 거부한다. source repository는 원본을 소유하고 immutable하게 유지한다. Arca는 source repository에 write, delete, move, rename, commit 또는 다른 mutation을 할 수 없다. logical SourceCard archive는 exact action, `sourceId`, `metadataVersion`, project, action hash에 bound된 unexpired single-use separate approval이 있을 때만 가능하며 physical source deletion은 금지한다.
+
+**원격 전송·저장·감사.** Arca는 metadata card와 승인된 최소 summary만 보존한다. raw excerpt, raw source content, credential, raw connector output, full prompt, full tool log는 durable storage, audit, Pino/SSE log, artifact preview, Agent memory에 저장하거나 기록하지 않는다. controlled SourceCard의 summary 또는 excerpt는 선택한 원격 모델과 무관하게 절대 전송하지 않는다. 허용되거나 거부된 registry action의 audit 최소 필드는 `actor`, `action`, `sourceId` 또는 `requestId`, `projectId`, `purpose`, `decision`, `policyVersion`, `connector`, `timestamp`, excerpt `range`/`locator`, `contentHash`이며 raw content는 포함하지 않는다. invisible/nonexistent source-specific attempt는 `source_lookup_not_found`으로만 보호 기록하고 `sourceId`와 `requestId`는 `null`이며 candidate metadata나 부재/비가시성을 구별하는 사유를 남기지 않는다. audit view와 aggregate count도 source visibility에 따라 필터링한다.
 
 ## 6. 권한 모델
 

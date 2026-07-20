@@ -6,7 +6,8 @@
 
 ## 1. 이 문서의 목적
 
-이 인덱스는 Orion Console을 기획·구현·검증·운영할 때 어떤 문서를 기준으로 판단해야 하는지 정의한다. 아래 13개 기준 문서는 하나의 규격 세트이며, 에이전트 프로필 17개와 모델 선정 근거, AI 개발 절차, 런타임 계약, 보안 정책, UI, 시험, 운영 절차까지 포함한다.
+이 인덱스는 Orion Console을 기획·구현·검증·운영할 때 어떤 문서를 기준으로 판단해야 하는지 정의한다. 아래 13개 기준 문서는 하나의 규격 세트이며, 에이전트 프로필 18개와 모델 선정 근거, AI 개발 절차, 런타임 계약, 보안 정책, UI, 시험, 운영 절차까지 포함한다.
+18번째 Arca 요구사항은 M1-M5 미래 계약으로만 [Agent Catalog](./orion-console-agent-catalog.md), [Security, Permission & Data Classification](./orion-console-security-permission-model.md), [Implementation Roadmap](./orion-console-implementation-roadmap.md), [API, Event & CLI Adapter Contract](./orion-console-api-event-adapter-contract.md), [Agent Profile Format](./orion-console-agent-profile-format.md), [UI/UX Specification](./orion-console-ui-ux-specification.md), [Test & Evaluation Plan](./orion-console-test-evaluation-plan.md), [Operations & Recovery Runbook](./orion-console-operations-recovery-runbook.md), [Architecture Decision Records](./orion-console-architecture-decision-records.md)에 연결한다. M0는 Arca runtime, profile seed, registry DB, scheduler 또는 health 운영 상태를 제공하지 않는다.
 
 ## 2. 문서 세트
 
@@ -14,7 +15,7 @@
 |---|---|---|---|
 | 제품 기준 | [PRD](./orion-console-prd.md) | 목표, 사용자, 범위, 기능·비기능 요구사항, 성공 지표, 수용 기준 | 제품 책임자, 전체 팀 |
 | 기술 기준 | [상세 기술 명세서](./orion-console-technical-specification.md) | 시스템 구조, 데이터 모델, 오케스트레이션, 동시성, Git 격리, 구현 및 검증 방법 | 아키텍트, 개발자, QA |
-| 에이전트 기준 | [Agent Catalog & SOUL](./orion-console-agent-catalog.md) | 17개 에이전트의 이름, 역할, 모델, 권한, 입출력, 협업 관계, 전체 `SOUL.md` | 제품 책임자, Agent 엔지니어 |
+| 에이전트 기준 | [Agent Catalog & SOUL](./orion-console-agent-catalog.md) | 18개 에이전트의 이름, 역할, 모델, 권한, 입출력, 협업 관계, 전체 `SOUL.md` | 제품 책임자, Agent 엔지니어 |
 | 모델 선정 | [Model Selection Rationale](./orion-console-model-selection-rationale.md) | 공식 자료 기반 모델 특성, 역할별 배정 이유, 보안·비용·가용성 제약, 재평가 절차 | 기술 총괄, Agent 엔지니어, 보안 책임자 |
 | 프로필 형식 | [Agent Profile Format](./orion-console-agent-profile-format.md) | YAML 스키마, 디렉터리 구조, 권한 템플릿, 버전·가져오기·내보내기 규칙 | 백엔드, Agent 엔지니어 |
 | 연동 계약 | [API, Event & CLI Adapter Contract](./orion-console-api-event-adapter-contract.md) | REST API, SSE 이벤트, Codex·Claude 어댑터, 오류 분류, 호환성 시험 | 백엔드, 프론트엔드, QA |
@@ -91,7 +92,7 @@
 | 실행 환경 | Windows 로컬, 단일 사용자, `127.0.0.1` 바인딩 |
 | Provider | Codex CLI, Claude Code CLI |
 | 인증 | 각 CLI의 기존 로그인 세션 사용, API Key 자체 저장 금지 |
-| 등록 에이전트 | 17개 |
+| 등록 에이전트 | 18개 |
 | 전체 동시 실행 | 최대 8개 |
 | Provider 기본 soft cap | Codex 4개, Claude 4개 |
 | Provider 일시 차용 | 유휴 슬롯이 있으면 Provider당 최대 6개 |
@@ -144,7 +145,7 @@
 ## 9. 문서 완료 정의
 
 - 인덱스를 제외한 13개 기준 문서가 모두 존재하고 링크가 유효하다.
-- 17개 에이전트의 이름, 역할, 모델, 권한, `SOUL.md`, 평가 기준이 카탈로그에 있다.
+- 18개 에이전트의 이름, 역할, 모델, 권한, `SOUL.md`, 평가 기준이 카탈로그에 있다.
 - 프로필, API, 이벤트, 어댑터 계약이 구현 가능한 수준으로 타입과 오류를 정의한다.
 - 보안 문서가 자료 등급, 승인 경계, 비밀정보, 파일·Git·명령 정책을 포함한다.
 - PRD 기능 요구사항이 시험 계획의 사례와 추적된다.

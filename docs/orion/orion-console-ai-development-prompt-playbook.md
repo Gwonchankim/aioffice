@@ -122,6 +122,20 @@ HANDOFF
 - 시험 설계: `orion-console-test-evaluation-plan.md`
 - 설치·복구·migration: `orion-console-operations-recovery-runbook.md`
 
+### 4.1 향후 Arca 변경 계획 추가 요구사항
+
+Arca 관련 변경은 M1-M5의 향후 계약으로만 계획하며 M0 runtime, health, DB, connector, scheduler 또는 retention 기능으로 주장하지 않는다. Arca 범위의 모든 `plan.md`는 다음을 식별하고 수용 증거에 연결해야 한다.
+
+- 정확히 `public`, `internal`, `confidential`, `controlled`인 자료 등급과 `restricted` 입력 시 사용자가 `controlled`을 명시적으로 선택하는 처리
+- 기존 source repository가 원본을 소유하고 Arca는 metadata와 승인된 최소 요약만 보관하며 원본을 변경하지 않는 경계
+- 후보 생성 전의 authorization-before-search와 requester·project·purpose·classification·role 확인
+- source-specific 권한 없음과 부재를 동일하게 처리하는 protected-metadata non-disclosure, 빈 검색 정규화, timing·side-effect 차단
+- 목적과 최소 범위가 필요한 excerpt 및 raw excerpt의 DB, log, artifact preview, prompt, tool log, Agent memory 저장 금지
+- metadata-only audit 필드, authorization-filtered audit view, 비가시 source lookup의 generic audit 처리
+- strict versioned SourceCard, SourceRequest, `register_source`, API/Agent/UI/profile 계약과 호환성·migration·rollback 경계
+- Security 문서 우선, `controlled` summary/excerpt의 원격 모델 전송 금지, permission-template 및 approval 경계
+- 해당 M1-M5 batch의 정상·실패·non-disclosure·security·lifecycle 수용 증거와 ARCA traceability ID
+
 ### 복사용 프롬프트
 
 ```text
@@ -148,6 +162,7 @@ HANDOFF
 7. API, schema, DB migration, event, profile format 변경이 있으면 호환성과 rollback 전략을 작성하라.
 8. 구현 순서, 위험도, 예상 검토 지점을 제안하라. 서로 독립적인 작업만 병렬 대상으로 표시하라.
 9. 요구사항이 모호해도 안전한 기본값으로 진행 가능한 부분은 assumption으로 명시하라. 제품 범위·보안 경계·외부 상태를 바꾸는 결정만 질문 목록에 넣어라.
+10. Arca 범위를 포함하면 §4.1의 자료 등급, source ownership, authorization-before-search, protected-metadata non-disclosure, raw excerpt 비지속화, audit, 계약/version, Security 우선순위와 M1-M5 수용 증거를 별도 계획 항목으로 식별하라. M0 runtime으로 대체하거나 주장하지 마라.
 
 다음 형식으로 `{REPO_PATH}/.orion/tasks/{TASK_ID}/plan.md`를 작성하라.
 
@@ -162,6 +177,7 @@ HANDOFF
 ## 8. Step-by-step Implementation Plan
 ## 9. Test and Evaluation Plan
 ## 10. Security, Permissions and Data Handling
+### 10.1 Future Arca Contract and M1-M5 Acceptance Evidence (Arca 범위일 때 필수)
 ## 11. Migration and Rollback
 ## 12. Documentation Changes
 ## 13. Risks and Mitigations

@@ -94,7 +94,7 @@ orion-console/
 ├─ packages/
 │  ├─ contracts/              # Zod schemas and shared TypeScript types
 │  ├─ orchestration/          # DAG validation, scheduler policies, state machines
-│  ├─ agent-catalog/          # 17 seed profiles and permission templates
+│  ├─ agent-catalog/          # 18 seed profiles and permission templates
 │  └─ test-fixtures/          # fake CLI and sanitized JSONL fixtures
 ├─ migrations/                # ordered SQLite SQL migrations
 ├─ scripts/                   # start, health check, optional real smoke test
@@ -703,6 +703,82 @@ integration:   orion/<task-short-id>/integration
 - 즉시 삭제는 task 실행 중에는 금지하고 취소·종료 후 수행
 - 삭제는 DB row와 artifact 파일을 같은 delete operation ID로 기록해 부분 실패 재시도를 지원
 
+### 15.2 미래 Arca 지식 레지스트리 기술 계약 (M1-M5)
+
+이 절은 엄격한 버전 관리 대상인 미래 계약이다. M0에는 Arca 프로필 seed·로드·실행, SourceCard·SourceRequest 타입/DB, SQLite/FTS5, 커넥터, 검색, 원문 범위 조회, 감사 런타임 또는 API endpoint가 구현되지 않는다. M0 health는 Arca·레지스트리 DB·scheduler·retention을 운영 중으로 표시하지 않는다. Arca는 원문을 기억하는 AI memory가 아니라, 원본 저장소가 소유하는 자료의 메타데이터와 승인된 최소 요약만 다루는 내부 지식 레지스트리다.
+
+`DataClassification`은 정확히 `"public" | "internal" | "confidential" | "controlled"`다. 다른 enum 값은 허용하지 않으며, `restricted` 입력은 묵시적으로 변환하지 않고 사용자가 `controlled`을 명시적으로 선택해야 한다. 미래 JSON schema는 unknown field를 거부한다. `ULID`는 `^[0-7][0-9A-HJKMNP-TV-Z]{25}$`에 맞는 26자 Crockford-base32 값이고, `UtcIso8601`은 UTC `Z`로 정규화한 parser-validated ISO 8601 instant다.
+
+#### 15.2.1 SourceCard — SC-001..SC-006
+
+SC-001: persisted SourceCard는 아래 필드를 모두 가지며, 별도로 nullable이라고 표시하지 않은 필드는 필수·non-null이다.
+
+| 필드 | 형식·제약 | 생성·nullability·변경 규칙 |
+|---|---|---|
+| `sourceId` | `ULID` | 시스템 생성, 필수·non-null·immutable; caller 입력 거부 |
+| `title` | NFC 정규화 non-empty string, 1..500 | 필수·non-null; 인가된 metadata update만 가능 |
+| `summary` | 승인된 최소 요약 string, 1..4,000, 또는 `null` | 필수이나 nullable; 원문/전체 excerpt 금지; 인가된 metadata update만 가능 |
+| `tags` | NFC 정규화 1..20개 non-empty string, 각 1..80, 정규화 후 unique | 필수·non-null; 빈 배열·중복 거부; 인가된 metadata update만 가능 |
+| `projectId` | `^[a-z][a-z0-9_-]{1,63}$` stable project ID | 필수·non-null·등록 후 immutable |
+| `connectorType` | `"local-folder" | "registered-git" | "google-drive" | "nas"` | 필수·non-null·등록 후 immutable; Drive/NAS는 미래 interface만 |
+| `locator` | canonical absolute connector locator, non-empty string 1..2,048 | 필수·non-null·등록 후 immutable; connector allowed root로 후속 검증 |
+| `owner` | stable team/user ID, non-empty string 1..128 | 필수·non-null; 인가된 metadata update만 가능 |
+| `classification` | `DataClassification` | 필수·non-null; 동일 유지 또는 상향만 가능, 하향 불가 |
+| `allowedRoles` | 정규화 non-empty role ID 1..50개, 각 1..128, 정규화 후 unique | 필수·non-null; 빈 배열·중복 거부; 인가된 metadata update만 가능 |
+| `version` | non-empty source-version string, 1..128 | 필수·non-null·등록 후 immutable |
+| `checksumAlgorithm` | `"sha256"` | 필수·non-null·등록 후 immutable |
+| `checksum` | lowercase SHA-256 hex `^[a-f0-9]{64}$` | 필수·non-null·등록 후 immutable |
+| `recordedAt` | `UtcIso8601` | 시스템 생성, 필수·non-null·immutable |
+| `lastVerifiedAt` | `UtcIso8601` | 시스템 생성, 필수·non-null; `recordedAt`보다 이르지 않고 단조 증가; caller 쓰기 불가 |
+| `status` | `"active" | "stale" | "missing" | "superseded" | "archived"` | 필수·non-null; 시스템 lifecycle transition만 가능 |
+| `supersedesSourceId` | `ULID` 또는 `null` | 필수이나 nullable·등록 후 immutable; 첫 등록은 `null`, 대체 등록은 같은 project의 별도 기존 card만 참조; self-reference와 lineage cycle 거부 |
+| `metadataVersion` | integer >= 1 | 시스템 생성, 필수·non-null; 1에서 시작, client 쓰기 불가; 수락된 mutable metadata update·verification·lifecycle transition마다 정확히 1 증가하는 CAS 값 |
+
+SC-002: 시스템은 `sourceId`, `recordedAt`, `lastVerifiedAt`, `status: "active"`, `metadataVersion: 1`을 생성하고 caller가 제공한 해당 값을 거부한다. SC-003: `projectId`, connector, `locator`, `version`, checksum algorithm/checksum, supersession lineage는 source-content identity이므로 immutable이며, version/checksum 변경은 새 SourceCard 등록과 이전 card의 원자적 `superseded` 전이로 처리한다. SC-004: 표에 열거한 인가된 metadata만 변경 가능하고 `metadataVersion`을 증가시키며 raw content를 영속화하지 않는다. SC-005: classification non-downgrade, connector containment, `allowedRoles` 검사를 metadata 노출 전에 강제한다. SC-006: 표의 non-null/nullable 및 같은 project 내 참조 규칙을 강제한다.
+
+#### 15.2.2 SourceRequest — SR-001..SR-004
+
+SR-001: persisted SourceRequest는 strict schema이며 `requestId: ULID`, immutable `projectId` (`^[a-z][a-z0-9_-]{1,63}$`), lifecycle-only `status` (`"open" | "resolved" | "cancelled"`), `requestedMaterial` (NFC non-empty 1..1,000), nullable `criteria` (NFC 1..2,000 또는 `null`), `acceptableFormats` (unique non-empty string 0..20, 각 1..128), `expectedLocations` (unique non-empty string 0..20, 각 1..2,048), `purpose` (NFC non-empty 1..500), immutable requester context `requesterRole` (normalized non-empty 1..128), system-generated immutable `requestedAt: UtcIso8601`, nullable `resolvedBySourceId: ULID | null`, nullable `resolvedAt: UtcIso8601 | null`, CAS `metadataVersion: integer >= 1`을 모두 가진다. `requestId`와 `requestedAt`은 시스템 생성이고, `metadataVersion`은 1에서 시작하여 수락된 open-state edit 또는 transition마다 정확히 1 증가한다. request detail은 `open`일 때만 편집할 수 있다.
+
+| SourceRequest 상태 | `resolvedBySourceId` / `resolvedAt` 불변조건 | 허용 전이 |
+|---|---|---|
+| `open` | 둘 다 반드시 `null` | `open -> resolved`, `open -> cancelled` |
+| `resolved` | 둘 다 populated; `resolvedBySourceId`는 같은 `projectId`의 existing non-archived SourceCard를 참조하고 `resolvedAt >= requestedAt` | terminal |
+| `cancelled` | 둘 다 반드시 `null` | terminal |
+
+SR-001은 resolution field 두 값이 `null`인 `open` request만 생성한다. SR-002: open request detail edit는 CAS를 사용한다. SR-003: `open -> resolved`는 참조 SourceCard 검증과 resolution field 두 값의 기록을 원자적으로 수행하며 다른 상태는 두 값을 채울 수 없다. SR-004: 표에 없는 전이를 거부하고 source를 발명하지 않는다.
+
+#### 15.2.3 `register_source` — RS-001..RS-004
+
+`register_source`는 strict object로 `title`, `tags`, `projectId`, `connectorType`, `locator`, `owner`, `classification`, `allowedRoles`, `version`, `checksumAlgorithm`, `checksum`을 required non-null caller input으로 받으며 각 값은 SC-001 형식·배열 규칙을 따른다. `summary`는 optional이고 주어진 경우 `null` 또는 승인된 최소 요약만 허용한다. `supersedesSourceId`는 optional, 기본 `null`이며 SC-006을 따른다. `sourceId`, `recordedAt`, `lastVerifiedAt`, `status`, `metadataVersion`은 generated-only이며 제공 시 거부한다.
+
+RS-001은 missing/unknown field, 빈·중복 `tags` 또는 `allowedRoles`, invalid ID/time/classification/checksum, 미승인 summary, raw-content input을 거부한다. RS-002는 등록 전 requester/project/classification/allowed-root authorization을 수행하고 project classification을 낮출 수 없다. RS-003은 non-null `supersedesSourceId`가 existing distinct same-project card를 참조하는지 검증하고 predecessor를 원자적으로 `superseded`로 전이한다. RS-004는 검증된 metadata와 승인된 최소 요약만 보존하고 raw content 없이 metadata/audit evidence를 내며 SC-002 생성 값의 active card를 만든다.
+
+#### 15.2.4 SourceCard lifecycle — LC-001..LC-005
+
+| 현재 상태 | 허용 다음 상태 | 필수 evidence·불변조건 |
+|---|---|---|
+| `active` | `stale` | checksum 또는 modification-time divergence 관측; immutable identity 유지 |
+| `active` | `missing` | broken/unreachable locator 검증; 대체를 추정하지 않음 |
+| `active` | `superseded` | immutable `supersedesSourceId`로 이 card를 참조하는 distinct successor의 원자적 등록 |
+| `active` | `archived` | exact card/action/`metadataVersion`에 bound된 유효 archive approval |
+| `stale` | `active` | 인가된 verification이 stored identity/checksum current를 증명하고 `lastVerifiedAt` 갱신 |
+| `stale` | `missing`, `superseded`, `archived` | 각각 broken locator, 원자적 successor 등록, 유효 archive approval |
+| `missing` | `active` | locator 복구 및 인가된 verification이 stored identity/checksum을 증명; `lastVerifiedAt` 갱신 |
+| `missing` | `superseded`, `archived` | 각각 원자적 successor 등록 또는 유효 archive approval |
+| `superseded` | `archived` | 유효 archive approval만; active/stale/missing으로 복귀 불가 |
+| `archived` | 없음 | terminal; unarchive·deletion transition 없음 |
+
+LC-001은 표 밖 전이를 거부한다. LC-002는 checksum/modification-time 변화에 `active -> stale`, broken locator에 `active -> missing`을 강제하며 immutable identity를 바꾸지 않는다. LC-003은 successor registration과 predecessor supersession을 원자적으로 하고 lineage를 보존한다. LC-004는 archive마다 별도 approval을 요구하며 physical deletion을 허용하지 않는다. LC-005는 수락된 transition/verification마다 `metadataVersion`을 정확히 1 증가시키고 Arca가 source repository에 write/delete/move/rename/commit 등 어떠한 mutation도 하지 못하게 한다.
+
+#### 15.2.5 Repository·connector·검색·감사 경계
+
+원본은 각 source repository가 계속 소유하고 immutable하게 보존한다. Arca는 metadata card와 승인된 최소 요약만 저장하며 원문, 전체 대화, credential, raw connector output, 전체 tool log, 전체 excerpt를 저장하지 않는다. M1+에서만 metadata-only registry에 SQLite+FTS5를 사용할 수 있고, 검색 대상은 title, 승인된 summary, tags, project, path/locator, owner, date, lifecycle status로 한정한다. PostgreSQL은 미래 repository-implementation replacement boundary일 뿐 M1-M5 배포 약속이나 M0 런타임이 아니다.
+
+MVP connector 구현은 미래의 `local-folder`와 `registered-git`만이다. `google-drive`와 `nas`는 locator namespace와 connector interface만 가지며 M0/MVP connector가 아니다. 모든 connector는 canonical absolute path를 만들고 symlink/junction을 resolve한 뒤 registered allowed root containment를 검사한다. relative path, `..` traversal, device path, UNC path, 또는 allowed root 밖으로 escape한 path를 거부한다.
+
+Authorization은 broad query 뒤 filtering하지 않고 requester role, project scope, purpose, classification, `allowedRoles`를 query 안에서 먼저 적용한다. 허용된 register/search/view/verify/lifecycle action의 audit 최소 필드는 `actor`, `action`, `sourceId` 또는 `requestId`, `projectId`, `purpose`, allow/deny `decision`, `policyVersion`, `connector`, `timestamp`, excerpt `range`/`locator`, `contentHash`다. audit에는 raw content, raw excerpt, credential, raw connector output, full prompt, full tool log를 넣지 않는다. `fetch_excerpt`는 `sourceId`, purpose, requester identity/role와 최소 sheet/page/paragraph/range를 요구하고 인가·classification 재검사 후 필요한 bounded range만 반환한다. raw excerpt는 durable DB, prompt/tool log, artifact preview, Agent memory 어디에도 영속화하지 않으며, controlled SourceCard의 summary 또는 excerpt는 선택 모델과 무관하게 원격 모델로 절대 전송하지 않는다.
+
 ## 16. UI 정보 구조
 
 ### 16.1 전역 레이아웃
@@ -742,7 +818,7 @@ integration:   orion/<task-short-id>/integration
 
 #### 에이전트
 
-- 17개 역할 카드와 공급자·모델·권한·활성 상태
+- 18개 역할 카드와 공급자·모델·권한·활성 상태
 - Description·SOUL Markdown 편집기
 - 버전 diff, 복원, JSON/YAML import/export
 - 모델 가용성과 대체 순서
@@ -786,6 +862,7 @@ integration:   orion/<task-short-id>/integration
 ### 17.3 Health
 
 `/api/health`는 다음을 반환한다.
+M0 health는 `degraded`이며 database, scheduler, retention을 모두 `not_initialized`로 보고하고 Arca를 운영 상태로 표시하지 않는다. 아래 항목은 M1+ 운영 목표다.
 
 - DB read/write 가능 여부
 - runtime·artifact·worktree 디스크 상태
@@ -906,7 +983,7 @@ integration:   orion/<task-short-id>/integration
 - SQLite migration runner와 repository layer 구현
 - Task·Step·Run 상태 전이 함수를 순수 함수로 작성
 - 이벤트 append와 상태 변경을 하나의 transaction으로 처리
-- 17개 프로필 seed migration 추가
+- 18개 프로필 seed migration 추가
 
 **검증 방법**
 
@@ -1000,7 +1077,7 @@ Codex와 Claude 실행을 동일한 이벤트·결과 계약으로 제어한다.
 ### Step 4. 에이전트 프로필 관리
 
 **목표**  
-17개 에이전트를 웹에서 안전하게 편집·버전 관리한다.
+18개 에이전트를 웹에서 안전하게 편집·버전 관리한다.
 
 **구현 기능과 방법**
 
@@ -1011,14 +1088,14 @@ Codex와 Claude 실행을 동일한 이벤트·결과 계약으로 제어한다.
 
 **검증 방법**
 
-- 17개 seed 값과 모델 매핑 snapshot test
+- 18개 seed 값과 모델 매핑 snapshot test
 - 버전 생성·복원·실행 스냅샷 불변성 테스트
 - 악성 YAML, unknown field, 중복 ID, 빈 SOUL 가져오기 실패
 - 기밀 프로젝트의 Fable 자동 차단 확인
 
 **체크리스트**
 
-- [ ] 17개 프로필 모두 활성화 가능
+- [ ] 18개 프로필 모두 활성화 가능
 - [ ] 기존 실행 기록이 프로필 수정에 영향받지 않음
 - [ ] import 전에 전체 검증하고 부분 적용하지 않음
 - [ ] export 후 재import 시 정보 손실 없음
@@ -1365,7 +1442,7 @@ Codex와 Claude 실행을 동일한 이벤트·결과 계약으로 제어한다.
 - [ ] `pnpm start`로 loopback 서버와 브라우저가 실행된다.
 - [ ] Codex·Claude 상태를 안전하게 확인하고 실제 read-only smoke가 성공한다.
 - [ ] 여러 Git 프로젝트와 자료 등급을 등록할 수 있다.
-- [ ] 17개 프로필을 편집·버전 관리·import/export할 수 있다.
+- [ ] 18개 프로필을 편집·버전 관리·import/export할 수 있다.
 - [ ] Orion이 구조화된 DAG를 만들고 서버가 이를 검증한다.
 - [ ] 최대 8개 실행, 120분·60회·재시도 2회 한도가 지켜진다.
 - [ ] 모델 자동 대체와 실행 모델 이력이 동작한다.

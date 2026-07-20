@@ -10,7 +10,7 @@
 - Codex·Claude CLI 형식 변화와 장애를 실제 모델 비용 없이 재현한다.
 - 8개 병렬 실행, 120분·60회 한도, 모델 fallback의 불변조건을 검증한다.
 - 사용자 기준 저장소와 민감정보를 보호한다.
-- 17개 에이전트가 자신의 역할과 안전 경계를 지키는지 평가한다.
+- 18개 에이전트가 자신의 역할과 안전 경계를 지키는지 평가한다.
 - 출시 판단을 100점 평가표와 필수 실패 조건으로 일관화한다.
 
 ## 2. 테스트 계층
@@ -34,7 +34,7 @@
 |---|---|---|:---:|
 | FR-001 프로젝트 등록 | PRJ-001~006 | Integration/E2E | O |
 | FR-002 CLI 상태 | PRV-001~005 | Unit/Integration/Smoke | O |
-| FR-003 17개 프로필 | AGT-001~008 | Unit/E2E | O |
+| FR-003 18개 프로필 | AGT-001~008 | Unit/E2E | O |
 | FR-004 Orion 계획 | PLN-001~010 | Unit/Agent Eval | O |
 | FR-005 규칙 검증 | PLN-011~020 | Unit/Property | O |
 | FR-006 8개 병렬 | SCH-001~010 | Integration/Performance | O |
@@ -48,6 +48,28 @@
 | FR-014 90일 보존 | DAT-001~010 | Integration/Security | O |
 | FR-015 프로필 import/export | AGT-009~018 | Unit/E2E/Security | O |
 | FR-016 비용 미추정 | USE-001~004 | Unit/E2E | O |
+### 3.1 Arca M1-M5 미래 계약 추적성
+M0에서 다음 ID는 문서·로드맵 요구사항 추적성일 뿐 실행 테스트가 아니다. 각 ID는 해당 기능이 출시되기 전에 M1-M5의 구체적인 테스트 케이스와 증거로 전환한다.
+
+| ID | 미래 테스트 계약 | 구현 배치 |
+|---|---|---|
+| ARCA-001 | 18번째 `arca` 프로필의 정확한 provider/model ID·fallback 순서·medium reasoning·Fable 미사용, strict `knowledge-registry` 권한 상한·교집합·승인·connector 범위, 정규화된 SOUL hash YAML 및 M0 disabled 상태 | M3 |
+| ARCA-002 | 한국어 Description과 완전한 SOUL의 identity·mission·output·safety 규칙 | M3 |
+| ARCA-003 | metadata-only SourceCard의 strict field 형식·필수/nullable·생성/불변 필드, tags/roles, checksum/classification, revision·참조 불변조건 | M1 |
+| ARCA-004 | strict SourceRequest의 필수/nullable·생성 revision·상태별 resolution 필드와 missing-material 생성/해결 | M1, M5 |
+| ARCA-005 | 기존 source store의 원문 소유, metadata card와 승인된 최소 요약만 보관, 원문/raw durable copy 금지 | M1 |
+| ARCA-006 | SQLite+FTS5는 M1+ 전용, local/Git MVP, Drive/NAS interface-only, PostgreSQL은 미래 repository 교체 경계 | M1, M4 |
+| ARCA-007 | authorization-before-search, source-specific 404/missing 및 빈 결과 정규화, timing/effect/audit 비공개, source-independent scope denial만 허용 | M1, M5 |
+| ARCA-008 | requester/role/purpose/range 기반 최소 bounded excerpt와 raw excerpt/log/memory 비보관 | M1, M5 |
+| ARCA-009 | 정확히 public/internal/confidential/controlled 네 등급, `restricted` 입력은 사용자가 `controlled`를 명시 선택, controlled summary/excerpt 원격 전송 차단 | M1, M2, M5 |
+| ARCA-010 | active/stale/missing/superseded/archived lifecycle, atomic supersession, metadataVersion, 승인 기반 archive와 삭제 금지 | M1, M4, M5 |
+| ARCA-011 | register/search/view/verify/lifecycle의 metadata-only 감사 필드와 raw content·credential·output 비보관 | M1, M4 |
+| ARCA-012 | source repository mutation 금지와 connector canonical path·symlink/junction allowed-root containment | M4 |
+| ARCA-013 | strict `register_source` 필수/선택/생성 필드, field validation, raw-content 입력 금지, authorization, same-project supersession, metadata-only retention | M1, M4 |
+| ARCA-014 | `find_source` authorization-stage filter와 invisible-only/no-match 동일 빈 결과, side effect/count/facet 금지, fabricated source 금지 | M1, M5 |
+| ARCA-015 | Nexus·specialist typed project/requester/purpose context와 구조화된 허용 결과 또는 source-specific generic missing, source-independent scope denial만 허용 | M3, M5 |
+| ARCA-016 | M0은 문서·로드맵 계약만 제공하고 모든 구현은 M1-M5에 배치하며 health가 Arca/DB/scheduler/retention을 운영 상태로 표시하지 않음 | M1-M5 (M0 runtime 없음) |
+
 
 ## 4. 테스트 데이터 원칙
 
@@ -57,6 +79,17 @@
 - Git 테스트는 매번 새 임시 저장소에서 수행한다.
 - 시간·ULID·resource reading은 injectable clock/provider로 제어한다.
 - golden output은 의미 있는 contract만 고정하고 자연어 문장 전체를 과도하게 snapshot하지 않는다.
+### 4.1 Arca registry fixture·통합 테스트 계약(M1-M5)
+M0에는 아래 계약의 실행 fixture나 registry runtime이 없으며, M1-M5에서만 synthetic fixture와 fake adapter로 구체화한다.
+
+- fixture에는 raw 민감 원문, raw excerpt, 개인정보, credential, token, 원본 connector output, 전체 prompt 또는 전체 tool log를 넣지 않고, 최소 synthetic metadata와 승인된 최소 요약만 사용한다.
+- ARCA-007-ND1과 ARCA-014-ND2는 visible·invisible·nonexistent source와 controlled clock/effect spy로 authorization-before-search, source-specific 동일 404/missing, invisible-only/no-match 동일 빈 envelope, bounded timing, connector/excerpt read·count·facet·자동 SourceRequest 부재를 검증한다.
+- controlled SourceCard summary 또는 excerpt는 fake transfer/process adapter에서도 원격 경계를 절대 넘지 않아야 하며, `restricted` fixture 입력은 자동 변환 없이 사용자의 `controlled` 명시 선택을 요구한다.
+- SourceCard/SourceRequest strict schema, metadataVersion compare-and-swap, same-project supersession, active/stale/missing/superseded/archived lifecycle, approval-bound archive와 source repository 불변성을 integration test로 검증한다.
+- audit fixture는 actor, action, sourceId/requestId, projectId, purpose, allow/deny, policy version, connector, timestamp, range/locator, content hash만 확인하며 raw content·credential·raw connector output·full prompt/tool log를 배제한다.
+- local-folder와 registered-git connector fixture는 canonical path와 symlink/junction allowed-root containment, read-only 원본, escaped root·write/move/delete 거부를 검증한다. Drive/NAS는 interface-only이므로 MVP connector fixture로 가장하지 않는다.
+- M3/M5 통합 테스트는 strict Arca profile/template ceiling과 Nexus·specialist의 typed project/requester/purpose invocation이 권한·비공개 경계를 우회하지 않는지만 검증한다.
+
 
 ## 5. 핵심 테스트 카탈로그
 
@@ -79,7 +112,7 @@
 
 ### 5.3 Agent Profile — AGT
 
-- AGT-001 17개 ID·역할·모델 seed 일치
+- AGT-001 18개 ID·역할·모델 seed 일치
 - AGT-002 SOUL hash 검증
 - AGT-003 권한 template 상한 초과 거부
 - AGT-004 Builder에 QA collaborator 필수
@@ -269,10 +302,11 @@
 | Insight | 품질 KPI·이상 탐지 | 데이터 정의·편향·검증 지표 |
 | Keystone | CI/CD·복구 개선 | 비밀관리·롤백·관측성 |
 | Nexus | 모호한 기능요청 정제 | 문제·MVP·인수 기준·제외 범위 |
+| Arca | M1-M5: 권한 있는 사용자가 권위 있는 원문을 찾도록 metadata card와 승인된 최소 요약을 관리 | 원문·민감 원본을 AI memory에 보관하지 않고 authorization-before-search·비공개·감사 경계 준수 |
 
 ### 6.3 Orion 특화 평가
 
-- 불필요하게 17개 모두 호출하지 않는다.
+- 불필요하게 18개 모두 호출하지 않는다.
 - 코드 작업에 Builder·QA·Integrator를 포함한다.
 - 코팅·규제·재무 조건부 필수 역할을 정확히 넣는다.
 - cycle 없는 DAG와 실행 가능한 acceptance criteria를 만든다.
@@ -379,7 +413,7 @@ Codex와 Claude 각각 저장소의 파일 수와 언어를 읽고 구조화된 
 - [ ] 사용자 기준 저장소 무변경 검증
 - [ ] 승인 우회·중복 실행 검증
 - [ ] controlled data process spawn 0 검증
-- [ ] 17개 agent 대표 평가 과제 실행
+- [ ] 18개 agent 대표 평가 과제 실행
 - [ ] 8개 병렬·100k event 성능 기준 충족
 - [ ] restart·retention·worktree recovery 검증
 - [ ] P0 E2E 100%, 핵심 coverage 80% 이상

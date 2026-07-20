@@ -2,7 +2,7 @@
 
 > 문서 버전: 1.0  
 > 조사 기준일: 2026-07-20  
-> 상태: 17개 기본 에이전트의 모델 선정 근거  
+> 상태: 18개 기본 에이전트의 모델 선정 근거
 > 적용 범위: GPT-5.6 Sol·Terra, Claude Fable 5·Opus 4.8·Sonnet 5
 
 ## 1. 목적
@@ -71,7 +71,7 @@ Fable 5는 adaptive thinking이 항상 켜져 있고 safeguard가 요청을 거�
 
 최종 배정은 공식 사양만으로 확정하지 않는다. 같은 역할 평가 세트를 후보 모델별로 최소 20회 실행하고, 정확도·완결성·수정 횟수·벽시계 시간·실패율을 기록한다.
 
-## 5. 17개 에이전트 최종 배정과 이유
+## 5. 18개 에이전트 최종 배정과 이유
 
 | # | 에이전트 | 기본 모델 | 배정 이유 |
 |---:|---|---|---|
@@ -92,6 +92,7 @@ Fable 5는 adaptive thinking이 항상 켜져 있고 safeguard가 요청을 거�
 | 15 | Insight | GPT-5.6 Terra | 데이터 profiling, 지표 계산, 반복 분석을 높은 처리량으로 수행하고 고난도 판단은 Sol에 escalation한다. |
 | 16 | Keystone | Claude Sonnet 5 | DevOps·SRE 코드와 설정의 빠른 수정·검증 loop에 적합하며 외부 배포는 모델과 무관하게 승인한다. |
 | 17 | Nexus | Claude Sonnet 5 | 요구사항·backlog·수용 기준은 잦은 상호작용과 반복 편집이 많아 균형형 모델을 사용한다. |
+| 18 | Arca | Claude Sonnet 5 | 향후 M1-M5 metadata-only registry 계약은 medium reasoning을 사용하며, 실행 전 프로젝트 classification과 provider policy를 확인한다. Fable은 기본·fallback으로 금지하고 fallback은 GPT-5.6 Terra → Claude Opus 4.8 순서만 허용한다. |
 
 ## 6. 기본 fallback 순서
 
@@ -170,8 +171,9 @@ Model Registry가 공식 profile과 충돌하면 실행을 강행하지 않고 U
 
 ## 10. 구현 체크리스트
 
-- [ ] 17개 profile의 primary·fallback이 Agent Catalog와 일치한다.
+- [ ] 18개 profile의 primary·fallback이 Agent Catalog와 일치한다.
 - [ ] Ledger의 기본 모델은 Opus 4.8이며 Fable이 아니다.
+- [ ] 향후 M1-M5의 Arca는 Fable을 기본 모델 또는 fallback으로 절대 사용하지 않는다.
 - [ ] Fable은 `confidential`에서 기본 차단되고 `controlled`에서 전면 차단된다.
 - [ ] Fable refusal을 일반 transport error와 구분한다.
 - [ ] Sonnet 5 token budget은 해당 tokenizer 기준으로 측정한다.

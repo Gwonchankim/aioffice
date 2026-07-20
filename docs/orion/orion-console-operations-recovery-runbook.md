@@ -399,3 +399,29 @@ worktree 전체는 기본 DB backup에 포함하지 않는다. 미통합 commit�
 - [ ] provider smoke
 - [ ] 임시 저장소 write workflow
 
+## 20. 향후 Arca 레지스트리 운영·복구
+
+이 절은 M1-M5의 향후 운영·복구 계약이다. M0에는 Arca 레지스트리, DB, connector, scheduler, retention 또는 Arca 운영 상태가 없으며, M0 health가 이들을 운영 가능으로 표시해서는 안 된다.
+
+### 20.1 최신성·connector 점검
+
+권한 있는 운영자는 metadata-only SourceCard의 저장 checksum과 수정 시각을 read-only로 재검증한다. checksum 또는 modification time 불일치는 `stale`, 확인된 broken 또는 unreachable locator는 `missing`으로 전이한다. 새 버전 또는 checksum의 자료는 기존 카드의 immutable identity를 수정하지 않고 별도 SourceCard로 등록하며, 동일 프로젝트의 이전 카드는 원자적으로 `superseded`가 된다.
+
+M4의 `local-folder`와 `registered-git` connector 점검은 canonical absolute path와 symlink/junction 해석 뒤 등록된 allowed root 안에 완전히 포함되는지 확인한다. relative, traversal, device, UNC 또는 root 밖으로 탈출하는 locator는 허용하지 않는다. 점검·복구는 connector를 통해 source repository를 쓰지 않는다.
+
+### 20.2 상태별 복구
+
+| 상태 | 운영·복구 처리 |
+|---|---|
+| `stale` | 원본을 변경하지 않고 권한 있는 재검증을 수행한다. 저장된 identity/checksum이 현재임을 증명하면 `active`로 복귀하고 `lastVerifiedAt`과 `metadataVersion`을 갱신한다. |
+| `missing` | locator 복구 후 저장된 identity/checksum을 재검증한 경우에만 `active`로 복귀한다. 추측으로 대체 자료를 연결하지 않는다. |
+| `superseded` | 후속 SourceCard와 lineage를 확인한다. `active`·`stale`·`missing`으로 되돌리지 않으며, 별도 유효 승인으로만 논리 `archived` 전이가 가능하다. |
+| `archived` | terminal 상태로 유지한다. unarchive, 물리 삭제 또는 source repository 정리를 수행하지 않는다. |
+
+모든 lifecycle 전이와 검증 갱신은 정해진 상태 전이, compare-and-swap `metadataVersion`, 그리고 archive의 단일 사용·미만료·정확한 카드/action/version 결합 승인을 검증한다.
+
+### 20.3 감사 검토와 불변 원본 경계
+
+감사 검토는 metadata-only로 수행한다. 권한 있는 검토자는 actor, action, sourceId/requestId, projectId, purpose, allow/deny 결정, policy version, connector, timestamp, excerpt range/locator, content hash를 확인하고, raw excerpt, credential, raw connector output, full prompt, full tool log를 수집하거나 표시하지 않는다. 감사 조회도 권한 필터를 적용하며 비가시·존재하지 않는 source-specific lookup의 차이나 집계를 노출하지 않는다.
+
+Arca는 source repository의 소유자가 아니다. 운영, 복구, 최신성 확인, connector 오류 대응, 보관 절차 중에도 원본 저장소에 write, delete, move, rename, commit 또는 그 밖의 mutation을 수행하지 않는다.

@@ -268,6 +268,23 @@ DAG node:
 - action hash·만료 countdown
 
 승인 후 target이 바뀌면 “기존 승인 무효” 상태로 전환한다.
+### 8.6 향후 Arca 지식 레지스트리 화면
+
+이 절은 M5의 향후 UI 계약이다. M0에는 Arca 화면, 레지스트리, 검색, SourceRequest, 감사 UI 또는 관련 runtime이 없다.
+
+레지스트리 목록·검색 화면은 요청자 역할, 프로젝트, 목적, 자료 등급과 `allowedRoles`를 검색 후보 생성 전에 적용한다. 권한 있는 결과에 한해 제목, 승인된 최소 요약, 위치, 버전, 소유자와 lifecycle 상태를 표시하며, 결과가 없거나 보이지 않는 결과만 있는 경우에는 count·facet·숨은 자료 존재를 드러내지 않는 동일한 빈 목록 상태를 표시한다.
+
+Source detail은 허용된 자료에만 제공한다. source-specific 권한 거부로 비가시인 자료와 존재하지 않는 `sourceId`는 동일한 비공개 `자료를 찾을 수 없습니다` 상태로 렌더링하고, `permission_denied`, 존재 여부, 제목, 요약, 소유자, 위치, 버전, 자료 등급, 접근 사유를 표시하지 않는다. 이 상태에는 특정 source에 연결된 재시도·SourceRequest 생성 affordance도 제공하지 않는다. source를 검사하기 전 레지스트리 범위 자체가 없는 경우에만 source와 무관한 일반 권한 안내를 표시할 수 있다.
+
+SourceRequest 화면은 사용자가 제공한 필요 자료, 기준, 예상 위치, 허용 형식, 목적을 입력해 요청을 생성하고 `open`/`resolved`/`cancelled` 상태를 표시한다. 해결은 같은 프로젝트의 허용된 비보관 SourceCard를 명시적으로 연결하며, 숨은 source를 추측하거나 자동 요청을 만들지 않는다.
+
+lifecycle 상태는 색상 외 label과 아이콘으로 다음 값을 모두 표시한다: `active`, `stale`, `missing`, `superseded`, `archived`. `stale`은 checksum 또는 수정 시각 불일치, `missing`은 확인된 locator 실패, `superseded`는 새 버전 SourceCard 등록, `archived`는 승인된 논리 보관을 뜻한다. `archived`는 terminal이며 UI에서 unarchive나 원본 삭제를 제안하지 않는다.
+
+자료 등급 입력·import 선택지는 정확히 `public`, `internal`, `confidential`, `controlled` 네 값이다. 입력값이 `restricted`이면 자동 변환하지 않고 처리를 멈춘 뒤 사용자가 `controlled`을 명시적으로 선택하도록 안내한다.
+
+발췌 화면은 목적과 최소 페이지·시트·문단·범위를 필수로 받아 승인된 최소 범위만 보여 준다. 전체 원문 미리보기·지속 저장·다운로드를 제공하지 않으며, `controlled` SourceCard의 요약 또는 발췌는 원격 모델로 전송하지 않는다.
+
+감사 화면은 권한에 따라 필터링된 metadata-only register/search/view/verify/lifecycle 기록의 loading·empty·error·결과 상태를 제공한다. 각 허용 기록은 actor, action, sourceId/requestId, projectId, purpose, allow/deny, policy version, connector, timestamp, excerpt range/locator, content hash만 표시하며 raw excerpt, credential, raw connector output, full prompt, full tool log와 비가시 source lookup 차이를 노출하지 않는다.
 
 ## 9. 공통 컴포넌트 상태
 

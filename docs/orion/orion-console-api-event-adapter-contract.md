@@ -86,11 +86,11 @@
 ```json
 {
   "data": {
-    "status": "healthy",
-    "database": "ok",
-    "scheduler": {"active": 3, "capacity": 8, "queued": 5},
+    "status": "degraded",
+    "database": "not_initialized",
+    "scheduler": {"status": "not_initialized"},
     "resources": {"memoryPercent": 62.1, "freeDiskBytes": 123456789},
-    "retention": {"lastRunAt": "2026-07-20T00:00:00Z", "status": "ok"}
+    "retention": {"status": "not_initialized"}
   },
   "meta": {"requestId": "01...", "timestamp": "..."}
 }
@@ -205,6 +205,45 @@ hash, target SHA, 만료시각, approval status를 transaction에서 확인하�
 #### `POST /api/v1/approvals/:id/reject`
 
 body에 reason이 필수다. task는 기본적으로 waiting_approval에서 needs_attention으로 전환한다.
+
+### 5.6 미래 Arca 지식 레지스트리 vNext 계약
+
+이 절은 M1-M5의 versioned vNext 계약이며, 공통 success/error envelope, `ULID`, UTC ISO 8601, `Idempotency-Key`, `NOT_FOUND`, `PERMISSION_DENIED`, `VALIDATION_FAILED`, `INVALID_STATE_TRANSITION`, `APPROVAL_REQUIRED` taxonomy를 재사용한다. M0에는 아래 endpoint, event, registry DB, connector, search, excerpt fetch, Nexus/specialist invocation이 구현되지 않으며 `/api/v1`에 Arca route를 추가하지 않는다. 모든 vNext request/response schema는 strict하고 unknown field를 거부하며, SourceCard/SourceRequest의 필드·nullability·immutability·CAS·lifecycle는 기술 명세서의 SC-001..SC-006, SR-001..SR-004, RS-001..RS-004, LC-001..LC-005를 따른다.
+
+#### 5.6.1 리소스와 endpoint
+
+| Method | vNext path | 계약 |
+|---|---|---|
+| `POST` | `/api/vNext/registry/source-cards` | `register_source` strict input으로 SourceCard를 등록한다. generated-only field를 거부하고 성공 시 active card를 반환한다. |
+| `GET` | `/api/vNext/registry/source-cards/:sourceId` | 인가된 SourceCard metadata만 반환한다. |
+| `PATCH` | `/api/vNext/registry/source-cards/:sourceId` | 인가된 mutable metadata만 `expectedMetadataVersion` CAS로 갱신한다. source-content identity, classification downgrade, raw content는 거부한다. |
+| `POST` | `/api/vNext/registry/query` | `projectId`, requester identity/role, `purpose`, query/filter, optional opaque cursor를 받는 authorization-constrained registry query다. |
+| `POST` | `/api/vNext/registry/source-cards/:sourceId/excerpt` | path의 `sourceId`, body의 `purpose`, requester identity/role, 최소 `range`(sheet/page/paragraph/range)를 요구한다. authorization·classification 재검사 뒤 필요한 bounded excerpt만 반환한다. |
+| `POST` | `/api/vNext/registry/source-cards/:sourceId/lifecycle` | `expectedMetadataVersion`, requested lifecycle action, verification evidence 또는 exact archive approval을 받으며 LC-001..LC-005의 허용 전이만 수행한다. physical source mutation·deletion endpoint는 없다. |
+| `POST` | `/api/vNext/registry/source-requests` | caller-supplied missing-material SourceRequest만 생성한다. hidden source reference를 받거나 자동 생성하지 않는다. |
+| `GET` | `/api/vNext/registry/source-requests/:requestId` | 인가된 SourceRequest를 반환한다. |
+| `PATCH` | `/api/vNext/registry/source-requests/:requestId` | open state의 mutable detail만 `expectedMetadataVersion` CAS로 수정한다. |
+| `POST` | `/api/vNext/registry/source-requests/:requestId/resolve` | 같은 project의 non-archived SourceCard와 `resolvedAt`을 검증해 `open -> resolved`만 원자적으로 수행한다. |
+| `POST` | `/api/vNext/registry/source-requests/:requestId/cancel` | `open -> cancelled`만 수행한다. |
+| `POST` | `/api/vNext/registry/invocations` | Nexus 또는 specialist caller가 `projectId`, requester identity/role, `purpose`, query 또는 source/range request를 명시해 versioned registry contract를 호출한다. 호출은 새 repository-write·permission-change·classification-downgrade·external-share·raw-content persistence 권한을 부여하지 않는다. |
+
+검색 성공 응답은 공통 envelope의 `data.items`만 사용하고, visible result가 없을 때 `{"data":{"items":[]}}` 형태의 빈 collection을 반환한다. 총 개수, 존재 여부, source-derived cursor, facet은 반환하지 않는다. excerpt 응답은 metadata에 허용된 bounded range만 포함하며 raw excerpt를 DB, full prompt/tool log, artifact preview, Agent memory에 저장하지 않는다.
+
+#### 5.6.2 레지스트리 audit event
+
+vNext registry action은 기존 event envelope와 audit sink를 재사용할 수 있으며 다음 event type만 추가할 수 있다: `registry.source_registered`, `registry.source_updated`, `registry.source_queried`, `registry.excerpt_fetched`, `registry.source_lifecycle_changed`, `registry.source_request_created`, `registry.source_request_resolved`, `registry.source_request_cancelled`, `registry.source_lookup_not_found`. 각 audit record의 최소 필드는 `actor`, `action`, `sourceId` 또는 `requestId`, `projectId`, `purpose`, allow/deny `decision`, `policyVersion`, `connector`, `timestamp`, excerpt `range`/`locator`, `contentHash`다. raw content, raw excerpt, credential, raw connector output, full prompt, full tool log는 event 또는 audit에 넣지 않는다. audit view와 aggregate count도 authorization-filtered다.
+
+#### 5.6.3 Source-specific non-disclosure
+
+source-specific `GET`, bounded-excerpt fetch, lifecycle/detail operation, SourceRequest resolution의 source reference, 그리고 Nexus/specialist source-specific invocation은 동일한 non-disclosure contract를 따른다.
+
+1. invisible/unauthorized source와 nonexistent source는 모두 같은 HTTP `404`와 표준 `NOT_FOUND` error envelope를 반환하며 source-derived `details`나 protected metadata를 넣지 않는다.
+2. query는 requester role, project scope, purpose, classification, `allowedRoles` predicate를 candidate 생성 전에 적용한다. invisible-only result와 no-match result는 같은 empty success envelope를 반환한다.
+3. `PERMISSION_DENIED`는 source ID, query, candidate, connector, SourceRequest를 검사하기 전의 source-independent missing registry-scope precondition에만 허용된다. source-specific path에서는 절대 사용하지 않는다.
+4. 두 source-specific not-found 경로는 같은 authorization-constrained lookup, bounded response budget, response shape를 사용한다. candidate-specific connector/excerpt read, metadata hydration, conditional count, response-size branch, source-dependent fast/slow branch를 수행하지 않는다.
+5. source-specific 결과로 SourceRequest, status change, notification, audit-view-visible event 또는 다른 caller-observable side effect를 자동 생성하지 않는다. zero-visible-result 뒤 caller가 명시적으로 만드는 SourceRequest는 caller-supplied material만 담고 hidden source reference를 포함하지 않는다.
+
+이 계약은 source existence, title, summary, owner, locator, classification, version, result count, timing, metadata와 SourceRequest side-channel을 모두 보호한다. controlled SourceCard의 summary 또는 excerpt는 모델 선택과 무관하게 원격 모델로 절대 전송하지 않는다.
 
 ## 6. SSE 계약
 

@@ -169,7 +169,7 @@ Node 24 `node:sqlite`, WAL mode, SQL migration, append-only event table을 사�
 
 ### Context
 
-고정 워크플로만으로 17개 역할과 다양한 과제를 처리하기 어렵지만 LLM에게 완전 자율 권한을 주면 예측 불가능하다.
+고정 워크플로만으로 18개 역할과 다양한 과제를 처리하기 어렵지만 LLM에게 완전 자율 권한을 주면 예측 불가능하다.
 
 ### Decision
 
@@ -305,9 +305,37 @@ Description, SOUL, 모델, 권한이 변경되면 과거 실행 재현성과 감
 
 - 병렬 효과와 로컬 안정성을 균형화한다.
 - resource governor와 property test가 필요하다.
-- 모든 17개 agent를 동시에 실행하지 않는다.
+- 모든 18개 agent를 동시에 실행하지 않는다.
 
 ### Revisit Conditions
 
 - hardware 변화, remote execution, 실제 부하 측정 결과에 따라 조정할 때
+---
+## ADR-011 — Metadata-only Knowledge Registry
+**Status:** Accepted M1+ architecture contract; M0 documentation only
+
+### Context
+M1-M5에서 권한 있는 사용자와 에이전트가 조직 자료의 권위 있는 원문을 찾도록 지원해야 하지만, 원문·민감 원본을 AI memory나 별도 registry에 복제하면 소유권·비공개·반출 위험이 커진다. M0에는 Arca runtime, registry DB, connector, search 또는 scheduler가 없다.
+
+### Decision
+- M1+ Arca registry는 metadata card와 승인된 최소 요약만 보관한다. 기존 source store는 원문의 소유자이며 원문은 불변으로 유지한다.
+- SQLite+FTS5는 M1+ metadata-only registry에만 사용한다. local-folder와 registered-Git은 MVP read connector이고, Drive/NAS는 locator namespace와 connector interface만 제공한다. PostgreSQL은 향후 repository implementation 교체 경계일 뿐 배포 약속이 아니다.
+- retrieval과 persistence에는 authorization-before-search와 source-specific non-disclosure를 적용한다. 권한 없는 source와 존재하지 않는 source는 동일한 generic missing/404 또는 빈 결과로 정규화하며, source-independent registry-scope precondition만 `permission_denied`를 사용할 수 있다.
+- classification은 정확히 `public`, `internal`, `confidential`, `controlled` 네 값만 사용한다. `restricted` 입력은 자동 변환하지 않고 사용자가 `controlled`를 명시 선택해야 하며, controlled summary/excerpt는 원격 모델에 절대 전송하지 않는다.
+- raw excerpt는 durable DB, prompt/tool log, artifact preview 또는 Agent memory에 보관하지 않는다. 허용된 register/search/view/verify/lifecycle의 감사는 metadata-only 필드만 기록한다.
+
+### Alternatives
+- 원문과 전문을 registry DB에 복제
+- Drive/NAS를 MVP connector로 즉시 구현
+- 초기 repository를 PostgreSQL로 운영
+
+### Consequences
+- M1-M5 구현은 source store mutation 없이 metadata·승인된 최소 요약·감사 계약을 검증해야 한다.
+- connector containment, lifecycle, 원격 전송 차단과 비공개 동작은 별도 contract와 adversarial test가 필요하다.
+- M0 health는 Arca, database, scheduler 또는 retention을 운영 상태로 표시하지 않는다.
+
+### Revisit Conditions
+- 조직 규모·repository replacement 요구가 PostgreSQL 경계를 실제 구현하도록 정당화할 때
+- Drive/NAS connector 또는 새로운 network source를 추가하기 전에 profile·security·connector contract를 재검토할 때
+- 원문 소유권, classification 또는 non-disclosure 보장을 더 강한 정책으로 변경해야 할 때
 

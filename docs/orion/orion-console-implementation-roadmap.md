@@ -10,7 +10,7 @@
 - 다음 Milestone은 이전 종료 게이트를 통과한 후 시작한다.
 - 실제 모델 호출보다 fake adapter와 fixture를 먼저 완성한다.
 - 보안·Git 격리·상태 일관성은 기능 편의보다 우선한다.
-- 17개 프로필을 모두 seed하되 구현 초기 end-to-end는 Orion·Nexus·Archon·Forge·Verify·Sentinel로 검증한다.
+- 18개 프로필을 모두 seed하되 구현 초기 end-to-end는 Orion·Nexus·Archon·Forge·Verify·Sentinel로 검증한다.
 - 2D 가상 오피스는 v1 출시 이후에만 착수한다.
 
 ## 2. Workstream
@@ -53,6 +53,7 @@ clean install과 한 명령 개발 실행이 가능한 TypeScript 모노레포�
 - Vitest, Playwright, lint, typecheck, build scripts
 - Pino, config loader, runtime directory abstraction
 - README 개발 시작 절차
+- Arca는 M0에서 문서·명세·로드맵 계약만 유지한다. registry, DB/FTS5, connector, search, profile seed·실행, Agent 실행, scheduler, audit 또는 source repository 접근·변경을 M0으로 이동하지 않으며 health는 Arca/DB/scheduler/retention을 운영 상태로 표시하지 않는다.
 
 ### 산출물
 
@@ -70,6 +71,17 @@ clean install과 한 명령 개발 실행이 가능한 TypeScript 모노레포�
 - `pnpm dev`, `pnpm build`, `pnpm test`, `pnpm typecheck` 성공
 - 서버는 127.0.0.1에만 bind
 - 기본 browser open 동작
+### Arca M1-M5 바인딩 구현 배치
+M0의 Arca 범위는 위 문서 계약뿐이며, 다음 배치는 M1-M5에서만 순서대로 구현하고 각 종료 증거를 충족해야 한다.
+
+| Milestone | Arca 구현 배치와 종료 증거 |
+|---|---|
+| M1 — Contracts, DB & Local Security | Strict SourceCard/SourceRequest/`register_source` schema, metadataVersion·referential·lifecycle 불변조건, SQLite migration, metadata-only repository와 FTS5 schema를 구현한다. 정확히 네 classification을 검증하고 `restricted` 입력은 사용자가 `controlled`를 명시 선택하도록 하며, authorization-before-search/non-disclosure/timing/no-side-effect 계약 테스트, controlled remote-transfer block, raw-excerpt persistence guard와 security contract test를 통과한다. |
+| M2 — Provider Adapters | 향후 model handoff의 classification/provider transfer-policy enforcement seam을 구현하고 fake-process fixture로 controlled summary/excerpt가 원격 경계를 넘지 않음을 증명한다. Arca의 default/fallback에 Fable을 사용하지 않는다. |
+| M3 — Profiles, Orion & Scheduler | 18번째 Arca profile과 Full SOUL의 strict-parse/seed/version/hash를 검증한다. `knowledge-registry` permission-template ceiling, 허용/금지 operation, approval-bound archive, connector/network boundary, Nexus·specialist typed invocation이 requester/purpose authorization을 자동 우회하지 않음을 검증한다. |
+| M4 — Git Isolation & Quality Gates | local-folder와 registered-Git read connector, canonical path·symlink/junction allowed-root test, immutable source repository, freshness/lifecycle/audit 검증을 격리된 quality gate로 구현한다. |
+| M5 — Dashboard & Approval Control Plane | registry/search/detail/request/lifecycle/audit UI/API를 연결하고, `restricted` classification 명시 선택 UX, source-specific generic not-found/empty non-disclosure와 source-independent scope 처리만, purpose/range excerpt UX, E2E·접근성 증거를 제공한다. |
+
 
 ## 5. M1 — Contracts, DB & Local Security
 
@@ -84,7 +96,7 @@ clean install과 한 명령 개발 실행이 가능한 TypeScript 모노레포�
 - Task·Step·Run 상태 머신과 append-only events
 - bootstrap token, cookie, CSRF, Origin·Host 검사
 - Git project validation, classification, provider policy
-- 17개 AgentProfile seed skeleton
+- 18개 AgentProfile seed skeleton
 
 ### 의존성
 
@@ -127,7 +139,7 @@ Codex·Claude를 공통 RunEvent와 RunResult로 실행·취소·재개한다.
 
 ### 목표
 
-17개 프로필을 실행 가능하게 하고 자연어 목표를 검증된 DAG로 자동 실행한다.
+18개 프로필을 실행 가능하게 하고 자연어 목표를 검증된 DAG로 자동 실행한다.
 
 ### 구현 범위
 
@@ -141,7 +153,7 @@ Codex·Claude를 공통 RunEvent와 RunResult로 실행·취소·재개한다.
 
 ### 종료 게이트
 
-- 17개 profile round-trip
+- 18개 profile round-trip
 - 과거 Run snapshot 불변
 - 1,000회 scheduler simulation invariant 0
 - 코드·코팅·규제·재무 필수 역할 규칙 통과
@@ -298,7 +310,7 @@ Codex·Claude를 공통 RunEvent와 RunResult로 실행·취소·재개한다.
 
 ### Functional
 
-- [ ] 17개 프로필 활성화·편집·import/export
+- [ ] 18개 프로필 활성화·편집·import/export
 - [ ] Orion plan·validator·8-slot scheduler
 - [ ] Codex·Claude stream·cancel·resume
 - [ ] Git worktree·QA·통합
