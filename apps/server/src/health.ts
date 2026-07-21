@@ -12,6 +12,7 @@ import type { ResourceReader } from './resources.js';
 export interface HealthRouteOptions {
   readonly resourceReader: ResourceReader;
   readonly runtimeDirectory: string;
+  readonly databaseStatus?: () => 'ok' | 'not_initialized' | 'error';
   readonly now?: () => Date;
   readonly requestId?: () => string;
 }
@@ -22,10 +23,12 @@ export function registerHealthRoute(app: FastifyInstance, options: HealthRouteOp
 
   app.get('/api/v1/health', async (): Promise<HealthSuccess> => {
     const resources = await options.resourceReader.read(options.runtimeDirectory);
-
+    const database = options.databaseStatus?.() ?? 'not_initialized';
     return healthSuccessSchema.parse({
       data: {
         ...canonicalM0DegradedHealth.data,
+        status: database === 'ok' ? 'healthy' : database === 'error' ? 'unhealthy' : 'degraded',
+        database,
         resources,
       },
       meta: {

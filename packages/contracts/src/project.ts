@@ -20,6 +20,8 @@ export const providerPolicySchema = z
   .strict();
 
 const commandArgumentSchema = nfcStringSchema(1, 256).refine(
+  // Intentionally rejects NUL and newline characters in command arguments.
+  // eslint-disable-next-line no-control-regex
   (value) => !/[\u0000\r\n;&|<>`$()]/.test(value),
   'Command arguments cannot contain shell metacharacters.',
 );

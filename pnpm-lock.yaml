@@ -41,9 +41,15 @@ importers:
 
   apps/server:
     dependencies:
+      '@orion/agent-catalog':
+        specifier: workspace:*
+        version: link:../../packages/agent-catalog
       '@orion/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@orion/orchestration':
+        specifier: workspace:*
+        version: link:../../packages/orchestration
       fastify:
         specifier: ^5.3.2
         version: 5.10.0
