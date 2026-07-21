@@ -1,3 +1,6 @@
+> SUPERSEDED (M0-FINAL-CORRECTION-001): this VAL-2 report's taxonomy-consistency claim was a false positive
+> (the docs then still used Step/단계/M-namespace). It is superseded by `validation-report-rev3.md` (VAL-3 PASS
+> at content `ea17d303`) and by `completion-report-rev2.md`. It is preserved unchanged below as audit history.
 # M0-FINAL Independent Validation Report (committed PASS evidence)
 
 - task_id: M0-REPOSITORY-BOOTSTRAP-FINAL
