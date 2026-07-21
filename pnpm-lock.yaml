@@ -82,7 +82,11 @@ importers:
         specifier: ^6.3.5
         version: 6.4.3(@types/node@24.13.3)
 
-  packages/agent-catalog: {}
+  packages/agent-catalog:
+    dependencies:
+      '@orion/contracts':
+        specifier: workspace:*
+        version: link:../contracts
 
   packages/contracts:
     dependencies:
