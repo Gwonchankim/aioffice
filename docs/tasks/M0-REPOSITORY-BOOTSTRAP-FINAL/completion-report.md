@@ -1,3 +1,6 @@
+> SUPERSEDED (M0-FINAL-CORRECTION-001): this original completion (final content `2bbcf27a`) is superseded by
+> `completion-report-rev2.md` (final content `ea17d303`) after the taxonomy/governance correction and independent
+> VAL-3 PASS. It is preserved unchanged below as audit history.
 # M0-FINAL Completion Report
 
 - **Task:** `M0-REPOSITORY-BOOTSTRAP-FINAL`
