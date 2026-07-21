@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { fetchHealth } from './health-client.js';
+import { bootstrapSession } from './session-client.js';
 import { createHealthViewModel } from './health-view-model.js';
 import type { HealthViewModel } from './health-view-model.js';
 
@@ -11,6 +12,9 @@ export function App() {
   const [retryCount, setRetryCount] = useState(0);
   const [state, setState] = useState<HealthLoadState>({ kind: 'loading' });
 
+  useEffect(() => {
+    void bootstrapSession().catch(() => undefined);
+  }, []);
   useEffect(() => {
     let cancelled = false;
 

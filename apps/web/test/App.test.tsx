@@ -41,17 +41,22 @@ describe('App', () => {
     expect(screen.getByText('42.5%')).toBeTruthy();
     expect(screen.getByText('2147483648 bytes')).toBeTruthy();
   });
+  it('renders initialized M1 database health while scheduler and retention remain uninitialized', async () => {
+    const m1Health = structuredClone(canonicalM0DegradedHealth);
+    m1Health.data.status = 'healthy';
+    m1Health.data.database = 'ok';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(healthResponse(m1Health)));
+
+    render(<App />);
+
+    expect(await screen.findByText('정상 (healthy)')).toBeTruthy();
+    expect(screen.getByText('정상 (ok)')).toBeTruthy();
+    expect(screen.getAllByText('초기화되지 않음')).toHaveLength(2);
+  });
 
   it.each([
     ['an invalid payload', {}],
     ['a payload missing required health fields', { data: { status: 'degraded' } }],
-    [
-      'an unhealthy payload',
-      {
-        ...canonicalM0DegradedHealth,
-        data: { ...canonicalM0DegradedHealth.data, status: 'unhealthy' },
-      },
-    ],
   ])(
     'renders an explicit error for %s instead of a healthy fallback',
     async (_description, payload) => {

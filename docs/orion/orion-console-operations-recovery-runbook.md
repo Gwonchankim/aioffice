@@ -64,29 +64,38 @@ Remove-Item Env:ORION_REAL_PROVIDER_TESTS
 ```
 
 소스 저장소와 runtime data를 혼합하지 않는다. runtime directory를 Git에 추가하지 않는다.
+### 4.1 M1 local database boundary
+
+M1 creates `%LOCALAPPDATA%\OrionConsole\orion.db` only after the runtime directory is available outside the repository. Every connection verifies foreign keys and WAL mode before the ordered forward-only migrations run. `DATABASE_OPEN_FAILED`, `DATABASE_CONFIGURATION_FAILED`, `MIGRATION_FAILED`, and `DATABASE_UNAVAILABLE` are stable sanitized failure codes; a failure prevents the listener from serving a false `database: "ok"` health result.
+
+Before any forward fix or application upgrade, checkpoint/online-backup the DB, record its SHA-256, and dry-open/migrate a copy in a separate temporary runtime. Do not edit an applied migration, delete `schema_migrations`, or use rollback SQL; ship the next ordered migration after the backup and test.
+
 
 ## 5. 정상 시작 점검
+M1 starts only the local database/API boundary. Scheduler, retention, provider execution, connectors, and an operational Arca runtime remain intentionally uninitialized; later runbook sections for those capabilities do not imply M1 availability.
+
+### 5.1 M1 startup and browser session constraints
+
+1. Verify the selected runtime directory is an absolute path outside the repository.
+2. Start the server; DB open/configuration/migration succeeds before the loopback listener binds.
+3. Read `runtime.json` only for the loopback host and selected port; it never contains a bootstrap secret.
+4. The browser receives a one-time bootstrap value only through an in-memory fragment handoff, clears that fragment before exchange, and receives a host-only `HttpOnly; Secure; SameSite=Strict` session cookie plus an in-memory CSRF value.
+5. `GET /api/v1/health` is healthy only when `database` is `"ok"`. Scheduler and retention must remain `"not_initialized"` with zero/null M1 values.
+
+Do not copy a bootstrap fragment into logs, tickets, runtime metadata, screenshots, traces, video, or browser artifacts.
+
 
 시작 순서:
 
-1. single instance lock
-2. runtime path·disk check
-3. DB open·migration
-4. interrupted state recovery
-5. CLI path·version·login check
-6. loopback bind
-7. browser bootstrap
-8. scheduler·retention 시작
+M1 start sequence:
 
-운영자는 Dashboard에서 다음이 정상인지 확인한다.
+1. runtime path·disk check
+2. DB open, WAL/foreign-key verification, and forward-only migration
+3. loopback bind
+4. in-memory browser bootstrap handoff
+5. initialized health check
 
-- 서버·DB healthy
-- Codex authenticated
-- Claude authenticated
-- active slots 0/8 또는 예상 값
-- free disk 10GB 이상
-- retention last run 성공
-- pending security alert 없음
+For M1, the Dashboard must show server/database healthy, scheduler/retention `not_initialized`, measured free disk, and no operational Arca status. Provider authentication, active scheduler slots, and retention success are not M1 checks.
 
 ## 6. 정상 종료
 
@@ -262,6 +271,7 @@ worktree 전체는 기본 DB backup에 포함하지 않는다. 미통합 commit�
 - backup SHA-256 기록
 - 별도 임시 runtime에서 DB open·migration dry check
 - project canonical path가 현재 환경에 존재하는지 report
+- applied migration은 수정하지 않고 다음 ordered migration으로 forward fix 하는지 확인
 
 ## 12. DB 복원
 

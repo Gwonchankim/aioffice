@@ -1,23 +1,20 @@
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 const workspaceRoot = fileURLToPath(new URL('.', import.meta.url));
 
-const coverageTargets = [
-  { directory: 'packages/contracts/src', include: 'packages/contracts/src/**/*.ts' },
-  { directory: 'apps/server/src', include: 'apps/server/src/**/*.ts' },
-  { directory: 'scripts', include: 'scripts/**/*.ts' },
-  { directory: 'apps/web/src', include: 'apps/web/src/**/*.{ts,tsx}' },
+const coverageTargetIncludes = [
+  'packages/contracts/src/**/*.ts',
+  'apps/server/src/**/*.ts',
+  'scripts/**/*.ts',
+  'apps/web/src/**/*.{ts,tsx}',
+  'packages/orchestration/src/**/*.ts',
+  'packages/agent-catalog/src/**/*.ts',
+  'packages/test-fixtures/src/**/*.ts',
 ] as const;
 
-const existingCoverageIncludes = coverageTargets
-  .filter(({ directory }) => existsSync(resolve(workspaceRoot, directory)))
-  .map(({ include }) => include);
-
 const coverageThresholds = Object.fromEntries(
-  existingCoverageIncludes.map((include) => [include, { lines: 80 }]),
+  coverageTargetIncludes.map((include) => [include, { lines: 80 }]),
 );
 
 export default defineConfig({
@@ -32,7 +29,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       all: true,
-      include: existingCoverageIncludes,
+      include: coverageTargetIncludes,
       exclude: [
         '**/*.d.ts',
         '**/fixtures/**',

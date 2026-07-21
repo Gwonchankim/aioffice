@@ -9,7 +9,7 @@ function cloneHealth(): HealthSuccess {
 }
 
 describe('createHealthViewModel', () => {
-  it('maps the truthful M0 health response to Korean status labels and actual resources', () => {
+  it('maps the truthful M0 degraded health response to Korean status labels and actual resources', () => {
     expect(createHealthViewModel(cloneHealth())).toEqual({
       overallStatus: '저하됨 (degraded)',
       databaseStatus: '초기화되지 않음',
@@ -20,26 +20,29 @@ describe('createHealthViewModel', () => {
     });
   });
 
-  it('rejects healthy and unhealthy overall statuses instead of reporting them as M0 health', () => {
-    const healthy = cloneHealth();
-    healthy.data.status = 'healthy';
-    const unhealthy = cloneHealth();
-    unhealthy.data.status = 'unhealthy';
+  it('maps initialized M1 database health without claiming scheduler or retention initialization', () => {
+    const initialized = cloneHealth();
+    initialized.data.status = 'healthy';
+    initialized.data.database = 'ok';
 
-    expect(createHealthViewModel(healthy)).toBeNull();
-    expect(createHealthViewModel(unhealthy)).toBeNull();
+    expect(createHealthViewModel(initialized)).toEqual({
+      overallStatus: '정상 (healthy)',
+      databaseStatus: '정상 (ok)',
+      schedulerStatus: '초기화되지 않음',
+      retentionStatus: '초기화되지 않음',
+      memoryPercent: '42.5',
+      freeDiskBytes: '2147483648',
+    });
   });
 
-  it('rejects initialized or failed subsystem states instead of reporting them as operational', () => {
-    const databaseError = cloneHealth();
-    databaseError.data.database = 'error';
-    const schedulerOk = cloneHealth();
-    schedulerOk.data.scheduler.status = 'ok';
-    const retentionError = cloneHealth();
-    retentionError.data.retention.status = 'error';
+  it('maps an unhealthy database status truthfully', () => {
+    const unhealthy = cloneHealth();
+    unhealthy.data.status = 'unhealthy';
+    unhealthy.data.database = 'error';
 
-    expect(createHealthViewModel(databaseError)).toBeNull();
-    expect(createHealthViewModel(schedulerOk)).toBeNull();
-    expect(createHealthViewModel(retentionError)).toBeNull();
+    expect(createHealthViewModel(unhealthy)).toMatchObject({
+      overallStatus: '비정상 (unhealthy)',
+      databaseStatus: '오류 (error)',
+    });
   });
 });

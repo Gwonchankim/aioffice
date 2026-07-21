@@ -16,10 +16,12 @@
     "build": "pnpm -r --if-present run build",
     "e2e:install": "pnpm exec playwright install chromium",
     "e2e": "pnpm exec playwright test",
+    "smoke:workspace-import": "pnpm --filter @orion/orchestration exec node --input-type=module --eval \"await import('./dist/index.js')\" && pnpm --filter @orion/agent-catalog exec node --input-type=module --eval \"await import('./dist/index.js')\" && pnpm --filter @orion/test-fixtures exec node --input-type=module --eval \"await import('./dist/index.js')\"",
     "dev": "pnpm --filter @orion/scripts dev",
     "start": "pnpm --filter @orion/scripts start"
   },
   "devDependencies": {
+    "@asteasolutions/zod-to-openapi": "7.3.4",
     "@axe-core/playwright": "^4.12.1",
     "@eslint/js": "^9.24.0",
     "@playwright/test": "^1.61.1",

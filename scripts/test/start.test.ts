@@ -95,7 +95,7 @@ class FakeClock implements Clock {
 
 function serverAt(port: number): StartedServer {
   return {
-    app: {} as StartedServer['app'],
+    app: { orionBootstrapToken: 'synthetic-bootstrap-token' } as StartedServer['app'],
     host: '127.0.0.1',
     port,
     url: `http://127.0.0.1:${port}`,
@@ -122,7 +122,10 @@ describe('@orion/scripts launchers', () => {
     });
 
     expect(result).toBe(0);
-    expect(events).toStrictEqual(['runtime.json', 'http://127.0.0.1:4317']);
+    expect(events).toStrictEqual([
+      'runtime.json',
+      'http://127.0.0.1:4317/#bootstrap_token=synthetic-bootstrap-token',
+    ]);
   });
 
   it('START-002 opens the actual fallback 4318 URL', async () => {
@@ -134,7 +137,9 @@ describe('@orion/scripts launchers', () => {
     });
 
     expect(result).toBe(0);
-    expect(browserOpener).toHaveBeenCalledWith('http://127.0.0.1:4318');
+    expect(browserOpener).toHaveBeenCalledWith(
+      'http://127.0.0.1:4318/#bootstrap_token=synthetic-bootstrap-token',
+    );
   });
 
   it('START-003 warns and prints the URL when the browser opener fails while the server stays ready', async () => {
@@ -142,7 +147,13 @@ describe('@orion/scripts launchers', () => {
     const output = vi.fn();
     const browser = new FakeBrowserProcess();
     const close = vi.fn();
-    const started = { ...serverAt(4317), app: { close } as StartedServer['app'] };
+    const started = {
+      ...serverAt(4317),
+      app: {
+        close,
+        orionBootstrapToken: 'synthetic-bootstrap-token',
+      } as StartedServer['app'],
+    };
 
     const result = await runProductionLauncher({
       browserOpener: (url) => {

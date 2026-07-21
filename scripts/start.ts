@@ -12,7 +12,7 @@ import {
 } from './browser.js';
 
 export type ServerStarter = () => Promise<StartedServer | undefined>;
-export type BrowserOpener = (actualUrl: AbsoluteUrl) => void;
+export type BrowserOpener = (bootstrapUrl: AbsoluteUrl) => void;
 
 export interface ProductionLauncherDependencies {
   readonly browserOpener?: BrowserOpener;
@@ -34,10 +34,11 @@ export async function runProductionLauncher(
     }
 
     const actualUrl = validatedServerUrl(started);
+    const bootstrapUrl = bootstrapUrlFor(started, actualUrl);
     try {
-      (dependencies.browserOpener ?? defaultBrowserOpener(logger, output))(actualUrl);
+      (dependencies.browserOpener ?? defaultBrowserOpener(logger, output))(bootstrapUrl);
     } catch {
-      reportBrowserOpenFailure(actualUrl, logger, output);
+      reportBrowserOpenFailure(bootstrapUrl, logger, output);
     }
     return 0;
   } catch {
@@ -56,6 +57,18 @@ function validatedServerUrl(server: StartedServer): AbsoluteUrl {
     throw new Error('The started server did not provide its actual loopback URL.');
   }
   return validateAbsoluteUrl(server.url);
+}
+
+function bootstrapUrlFor(server: StartedServer, actualUrl: AbsoluteUrl): AbsoluteUrl {
+  const token = (server.app as unknown as { readonly orionBootstrapToken?: unknown })
+    .orionBootstrapToken;
+  if (typeof token !== 'string' || token.length === 0) {
+    throw new Error('The server did not provide an in-memory bootstrap token.');
+  }
+
+  const bootstrapUrl = new URL(actualUrl);
+  bootstrapUrl.hash = new URLSearchParams({ bootstrap_token: token }).toString();
+  return validateAbsoluteUrl(bootstrapUrl.toString());
 }
 
 function defaultBrowserOpener(

@@ -1,0 +1,2078 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Orion Console Local M1 API",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:{port}",
+      "variables": {
+        "port": {
+          "default": "4317"
+        }
+      }
+    }
+  ],
+  "components": {
+    "schemas": {
+      "BootstrapSessionSuccess": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["csrfToken"],
+            "properties": {
+              "csrfToken": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["requestId", "timestamp"],
+            "properties": {
+              "requestId": {
+                "type": "string"
+              },
+              "timestamp": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      },
+      "HealthSuccess": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": ["healthy", "degraded", "unhealthy"]
+              },
+              "database": {
+                "type": "string",
+                "enum": ["ok", "not_initialized", "error"]
+              },
+              "scheduler": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": ["ok", "not_initialized", "error"]
+                  },
+                  "active": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "capacity": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "queued": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": ["status", "active", "capacity", "queued"],
+                "additionalProperties": false
+              },
+              "resources": {
+                "type": "object",
+                "properties": {
+                  "memoryPercent": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "freeDiskBytes": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": ["memoryPercent", "freeDiskBytes"],
+                "additionalProperties": false
+              },
+              "retention": {
+                "type": "object",
+                "properties": {
+                  "lastRunAt": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["ok", "not_initialized", "error"]
+                  }
+                },
+                "required": ["lastRunAt", "status"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["status", "database", "scheduler", "resources", "retention"],
+            "additionalProperties": false
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "requestId": {
+                "type": "string",
+                "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+              },
+              "timestamp": {
+                "type": "string"
+              }
+            },
+            "required": ["requestId", "timestamp"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["data", "meta"],
+        "additionalProperties": false
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "BAD_REQUEST",
+                  "SESSION_REQUIRED",
+                  "ORIGIN_REJECTED",
+                  "HOST_REJECTED",
+                  "CSRF_REJECTED",
+                  "NOT_FOUND",
+                  "PERMISSION_DENIED",
+                  "VALIDATION_FAILED",
+                  "PLAN_VALIDATION_FAILED",
+                  "INVALID_STATE_TRANSITION",
+                  "IDEMPOTENCY_CONFLICT",
+                  "PROJECT_CONFLICT",
+                  "PROJECT_POLICY_CONFLICT",
+                  "REPOSITORY_MUTATED_DURING_REGISTRATION",
+                  "TASK_EXECUTION_CONFLICT",
+                  "WORKTREE_CONFLICT",
+                  "APPROVAL_REQUIRED",
+                  "TASK_LIMIT_REACHED",
+                  "PROVIDER_UNAVAILABLE",
+                  "RESOURCE_EXHAUSTED",
+                  "DATABASE_OPEN_FAILED",
+                  "DATABASE_CONFIGURATION_FAILED",
+                  "MIGRATION_FAILED",
+                  "DATABASE_UNAVAILABLE",
+                  "CONTROLLED_EXECUTION_BLOCKED",
+                  "INTERNAL_ERROR"
+                ]
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "details": {
+                "nullable": true
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": ["code", "message", "retryable"],
+            "additionalProperties": false
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "requestId": {
+                "type": "string",
+                "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+              },
+              "timestamp": {
+                "type": "string"
+              }
+            },
+            "required": ["requestId", "timestamp"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["error", "meta"],
+        "additionalProperties": false
+      },
+      "FableConfirmationSuccess": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "confirmationId": {
+                "type": "string",
+                "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+              },
+              "expiresAt": {
+                "type": "string"
+              },
+              "warningStatementVersion": {
+                "type": "string"
+              }
+            },
+            "required": ["confirmationId", "expiresAt", "warningStatementVersion"],
+            "additionalProperties": false
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "requestId": {
+                "type": "string",
+                "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+              },
+              "timestamp": {
+                "type": "string"
+              }
+            },
+            "required": ["requestId", "timestamp"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["data", "meta"],
+        "additionalProperties": false
+      },
+      "ProjectListSuccess": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+                    },
+                    "projectKey": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9_-]{1,63}$"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "repositoryPath": {
+                      "type": "string"
+                    },
+                    "defaultBranch": {
+                      "type": "string"
+                    },
+                    "classification": {
+                      "type": "string",
+                      "enum": ["public", "internal", "confidential", "controlled"]
+                    },
+                    "providerPolicy": {
+                      "type": "object",
+                      "properties": {
+                        "openai": {
+                          "type": "boolean"
+                        },
+                        "anthropic": {
+                          "type": "boolean"
+                        },
+                        "allowFable": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["openai", "anthropic", "allowFable"],
+                      "additionalProperties": false
+                    },
+                    "allowedAgentIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "maxItems": 18
+                    },
+                    "allowedCommands": {
+                      "type": "object",
+                      "properties": {
+                        "read": {
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 1,
+                                "maxItems": 4
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 1,
+                                "maxItems": 4
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 1,
+                                "maxItems": 4
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 1,
+                                "maxItems": 4
+                              }
+                            ]
+                          },
+                          "maxItems": 20
+                        },
+                        "verify": {
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 1,
+                                "maxItems": 4
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 1,
+                                "maxItems": 4
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 1,
+                                "maxItems": 4
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 1,
+                                "maxItems": 4
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 1,
+                                "maxItems": 4
+                              }
+                            ]
+                          },
+                          "maxItems": 20
+                        },
+                        "localWrite": {
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 1,
+                                "maxItems": 4
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 1,
+                                "maxItems": 4
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 1,
+                                "maxItems": 4
+                              }
+                            ]
+                          },
+                          "maxItems": 20
+                        }
+                      },
+                      "required": ["read", "verify", "localWrite"],
+                      "additionalProperties": false
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    },
+                    "unregisteredAt": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "projectKey",
+                    "name",
+                    "repositoryPath",
+                    "defaultBranch",
+                    "classification",
+                    "providerPolicy",
+                    "allowedAgentIds",
+                    "allowedCommands",
+                    "createdAt",
+                    "updatedAt",
+                    "unregisteredAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["items"],
+            "additionalProperties": false
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "requestId": {
+                "type": "string",
+                "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+              },
+              "timestamp": {
+                "type": "string"
+              }
+            },
+            "required": ["requestId", "timestamp"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["data", "meta"],
+        "additionalProperties": false
+      },
+      "ProjectWithGitStatusSuccess": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "project": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+                  },
+                  "projectKey": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_-]{1,63}$"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "repositoryPath": {
+                    "type": "string"
+                  },
+                  "defaultBranch": {
+                    "type": "string"
+                  },
+                  "classification": {
+                    "type": "string",
+                    "enum": ["public", "internal", "confidential", "controlled"]
+                  },
+                  "providerPolicy": {
+                    "type": "object",
+                    "properties": {
+                      "openai": {
+                        "type": "boolean"
+                      },
+                      "anthropic": {
+                        "type": "boolean"
+                      },
+                      "allowFable": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": ["openai", "anthropic", "allowFable"],
+                    "additionalProperties": false
+                  },
+                  "allowedAgentIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "maxItems": 18
+                  },
+                  "allowedCommands": {
+                    "type": "object",
+                    "properties": {
+                      "read": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            }
+                          ]
+                        },
+                        "maxItems": 20
+                      },
+                      "verify": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            }
+                          ]
+                        },
+                        "maxItems": 20
+                      },
+                      "localWrite": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            }
+                          ]
+                        },
+                        "maxItems": 20
+                      }
+                    },
+                    "required": ["read", "verify", "localWrite"],
+                    "additionalProperties": false
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "updatedAt": {
+                    "type": "string"
+                  },
+                  "unregisteredAt": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "id",
+                  "projectKey",
+                  "name",
+                  "repositoryPath",
+                  "defaultBranch",
+                  "classification",
+                  "providerPolicy",
+                  "allowedAgentIds",
+                  "allowedCommands",
+                  "createdAt",
+                  "updatedAt",
+                  "unregisteredAt"
+                ],
+                "additionalProperties": false
+              },
+              "git": {
+                "type": "object",
+                "properties": {
+                  "headSha": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{40}(?:[a-f0-9]{24})?$"
+                  },
+                  "branch": {
+                    "type": "string"
+                  },
+                  "dirty": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["headSha", "branch", "dirty"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["project", "git"],
+            "additionalProperties": false
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "requestId": {
+                "type": "string",
+                "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+              },
+              "timestamp": {
+                "type": "string"
+              }
+            },
+            "required": ["requestId", "timestamp"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["data", "meta"],
+        "additionalProperties": false
+      },
+      "ProjectDeleteSuccess": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "project": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+                  },
+                  "projectKey": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_-]{1,63}$"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "repositoryPath": {
+                    "type": "string"
+                  },
+                  "defaultBranch": {
+                    "type": "string"
+                  },
+                  "classification": {
+                    "type": "string",
+                    "enum": ["public", "internal", "confidential", "controlled"]
+                  },
+                  "providerPolicy": {
+                    "type": "object",
+                    "properties": {
+                      "openai": {
+                        "type": "boolean"
+                      },
+                      "anthropic": {
+                        "type": "boolean"
+                      },
+                      "allowFable": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": ["openai", "anthropic", "allowFable"],
+                    "additionalProperties": false
+                  },
+                  "allowedAgentIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "maxItems": 18
+                  },
+                  "allowedCommands": {
+                    "type": "object",
+                    "properties": {
+                      "read": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            }
+                          ]
+                        },
+                        "maxItems": 20
+                      },
+                      "verify": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            }
+                          ]
+                        },
+                        "maxItems": 20
+                      },
+                      "localWrite": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            }
+                          ]
+                        },
+                        "maxItems": 20
+                      }
+                    },
+                    "required": ["read", "verify", "localWrite"],
+                    "additionalProperties": false
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "updatedAt": {
+                    "type": "string"
+                  },
+                  "unregisteredAt": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "id",
+                  "projectKey",
+                  "name",
+                  "repositoryPath",
+                  "defaultBranch",
+                  "classification",
+                  "providerPolicy",
+                  "allowedAgentIds",
+                  "allowedCommands",
+                  "createdAt",
+                  "updatedAt",
+                  "unregisteredAt"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": ["project"],
+            "additionalProperties": false
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "requestId": {
+                "type": "string",
+                "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+              },
+              "timestamp": {
+                "type": "string"
+              }
+            },
+            "required": ["requestId", "timestamp"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["data", "meta"],
+        "additionalProperties": false
+      }
+    },
+    "parameters": {}
+  },
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "operationId": "getHealth",
+        "responses": {
+          "200": {
+            "description": "Initialized local health status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthSuccess"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected local failure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/session/bootstrap": {
+      "post": {
+        "operationId": "bootstrapSession",
+        "parameters": [
+          {
+            "name": "origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "x-orion-bootstrap-token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Session established.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "name": "BootstrapSessionSuccess",
+                  "ref": {
+                    "$ref": "#/components/schemas/BootstrapSessionSuccess"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bootstrap token rejected.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Origin rejected.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/provider-policy/fable-confirmations": {
+      "post": {
+        "operationId": "createFableConfirmation",
+        "parameters": [
+          {
+            "name": "cookie",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "scope": {
+                        "type": "string",
+                        "enum": ["project-create"]
+                      },
+                      "projectKey": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9_-]{1,63}$"
+                      },
+                      "proposedProviderPolicy": {
+                        "type": "object",
+                        "properties": {
+                          "openai": {
+                            "type": "boolean"
+                          },
+                          "anthropic": {
+                            "type": "boolean"
+                          },
+                          "allowFable": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["openai", "anthropic", "allowFable"],
+                        "additionalProperties": false
+                      },
+                      "warningStatementVersion": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "scope",
+                      "projectKey",
+                      "proposedProviderPolicy",
+                      "warningStatementVersion"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "scope": {
+                        "type": "string",
+                        "enum": ["project-update"]
+                      },
+                      "projectId": {
+                        "type": "string",
+                        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+                      },
+                      "proposedProviderPolicy": {
+                        "type": "object",
+                        "properties": {
+                          "openai": {
+                            "type": "boolean"
+                          },
+                          "anthropic": {
+                            "type": "boolean"
+                          },
+                          "allowFable": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["openai", "anthropic", "allowFable"],
+                        "additionalProperties": false
+                      },
+                      "warningStatementVersion": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "scope",
+                      "projectId",
+                      "proposedProviderPolicy",
+                      "warningStatementVersion"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "HTTP 201 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FableConfirmationSuccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "HTTP 400 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "HTTP 401 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "HTTP 403 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "HTTP 409 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "HTTP 422 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects": {
+      "get": {
+        "operationId": "listProjects",
+        "parameters": [
+          {
+            "name": "cookie",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTTP 200 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectListSuccess"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "HTTP 401 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createProject",
+        "parameters": [
+          {
+            "name": "cookie",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectKey": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_-]{1,63}$"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "repositoryPath": {
+                    "type": "string"
+                  },
+                  "defaultBranch": {
+                    "type": "string"
+                  },
+                  "classification": {
+                    "type": "string",
+                    "enum": ["public", "internal", "confidential", "controlled"]
+                  },
+                  "providerPolicy": {
+                    "type": "object",
+                    "properties": {
+                      "openai": {
+                        "type": "boolean"
+                      },
+                      "anthropic": {
+                        "type": "boolean"
+                      },
+                      "allowFable": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": ["openai", "anthropic", "allowFable"],
+                    "additionalProperties": false
+                  },
+                  "allowedAgentIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "maxItems": 18
+                  },
+                  "allowedCommands": {
+                    "type": "object",
+                    "properties": {
+                      "read": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            }
+                          ]
+                        },
+                        "maxItems": 20
+                      },
+                      "verify": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            }
+                          ]
+                        },
+                        "maxItems": 20
+                      },
+                      "localWrite": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            }
+                          ]
+                        },
+                        "maxItems": 20
+                      }
+                    },
+                    "required": ["read", "verify", "localWrite"],
+                    "additionalProperties": false
+                  },
+                  "fableWarningConfirmationId": {
+                    "type": "string",
+                    "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+                  }
+                },
+                "required": [
+                  "projectKey",
+                  "name",
+                  "repositoryPath",
+                  "defaultBranch",
+                  "classification",
+                  "providerPolicy",
+                  "allowedAgentIds",
+                  "allowedCommands"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "HTTP 201 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectWithGitStatusSuccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "HTTP 400 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "HTTP 401 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "HTTP 403 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "HTTP 409 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "HTTP 422 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{id}": {
+      "get": {
+        "operationId": "getProject",
+        "parameters": [
+          {
+            "name": "cookie",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTTP 200 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectWithGitStatusSuccess"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "HTTP 401 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "HTTP 404 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateProject",
+        "parameters": [
+          {
+            "name": "cookie",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "defaultBranch": {
+                    "type": "string"
+                  },
+                  "classification": {
+                    "type": "string",
+                    "enum": ["public", "internal", "confidential", "controlled"]
+                  },
+                  "providerPolicy": {
+                    "type": "object",
+                    "properties": {
+                      "openai": {
+                        "type": "boolean"
+                      },
+                      "anthropic": {
+                        "type": "boolean"
+                      },
+                      "allowFable": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": ["openai", "anthropic", "allowFable"],
+                    "additionalProperties": false
+                  },
+                  "allowedAgentIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "maxItems": 18
+                  },
+                  "allowedCommands": {
+                    "type": "object",
+                    "properties": {
+                      "read": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            }
+                          ]
+                        },
+                        "maxItems": 20
+                      },
+                      "verify": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            }
+                          ]
+                        },
+                        "maxItems": 20
+                      },
+                      "localWrite": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "maxItems": 4
+                            }
+                          ]
+                        },
+                        "maxItems": 20
+                      }
+                    },
+                    "required": ["read", "verify", "localWrite"],
+                    "additionalProperties": false
+                  },
+                  "fableWarningConfirmationId": {
+                    "type": "string",
+                    "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "HTTP 200 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectWithGitStatusSuccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "HTTP 400 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "HTTP 401 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "HTTP 403 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "HTTP 404 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "HTTP 409 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "HTTP 422 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteProject",
+        "parameters": [
+          {
+            "name": "cookie",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "HTTP 200 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectDeleteSuccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "HTTP 400 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "HTTP 401 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "HTTP 403 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "HTTP 404 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "HTTP 409 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -48,8 +48,21 @@
 | FR-014 90일 보존 | DAT-001~010 | Integration/Security | O |
 | FR-015 프로필 import/export | AGT-009~018 | Unit/E2E/Security | O |
 | FR-016 비용 미추정 | USE-001~004 | Unit/E2E | O |
-### 3.1 Arca M1-M5 미래 계약 추적성
-M0에서 다음 ID는 문서·로드맵 요구사항 추적성일 뿐 실행 테스트가 아니다. 각 ID는 해당 기능이 출시되기 전에 M1-M5의 구체적인 테스트 케이스와 증거로 전환한다.
+### 3.1 M1 실행 증거
+
+| 영역 | M1 ID와 필수 증거 |
+|---|---|
+| SQLite/migration | `M1-DB-001~010`: repository 밖의 새 임시 DB에서 WAL·foreign key·세 개의 forward-only migration, checksum 불일치 거부, 재실행 no-op, 18개 disabled seed를 검증한다. |
+| 상태/event | `M1-STM-001~006`, `M1-EVT-001~006`: Task/Step/Run의 허용·금지 전이를 repository와 direct SQL로 모두 검증하고, 상태/event 원자성·run sequence race·snapshot 불변성을 증명한다. |
+| local Project | `PRJ-001~008`, `M1-PRJ-PATH-001~008`, `M1-PRJ-UNREG-001~003`: canonical path, read-only Git snapshot, policy, idempotency, nonterminal Task/worktree unregister conflict를 synthetic per-test repository로 검증한다. |
+| session/security | `M1-SEC-001~014`: exact loopback Host/Origin, single-use bootstrap, `HttpOnly; Secure; SameSite=Strict` host-only cookie, fragment clear, CSRF, redaction, and no token diagnostics를 검증한다. |
+| OpenAPI/E2E | `M1-API-001~004`, `M1-E2E-001~003`: strict route registry/generated document parity, initialized `database: "ok"` health, Chromium bootstrap/session/CSRF, P0 100%, axe Critical 0, browser console error 0을 검증한다. |
+| Arca metadata boundary | `M1-ARCA-001~014`, `M1-ARCA-ND-001~004`, `M1-ARCA-RAW-001~003`, `M1-ARCA-XFER-001~002`: strict metadata-only schema, authorization-before-search, CAS/lifecycle/audit, raw-field rejection, controlled transfer block을 검증한다. |
+
+M1 증거는 synthetic data만 사용한다. Browser/runtime/result directory와 per-test Git repository는 repository 밖의 고유한 OS-temp path이며 bootstrap coverage에서는 trace, screenshot, video, retained Playwright output을 비활성화한다.
+
+### 3.2 Arca M1-M5 미래 계약 추적성
+M1에서 ARCA-003~014는 metadata-only implementation evidence로 전환한다. ARCA-001~002와 ARCA-015~016의 future runtime behavior는 각 milestone 전까지 운영 기능으로 만들지 않는다.
 
 | ID | 미래 테스트 계약 | 구현 배치 |
 |---|---|---|

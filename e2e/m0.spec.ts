@@ -1,12 +1,22 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
 import type { Page, TestInfo } from '@playwright/test';
-import { healthSuccessSchema } from '@orion/contracts';
-import type { HealthSuccess } from '@orion/contracts';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
 
-const runtimeMetadataPath = resolve(process.cwd(), '.orion-runtime', 'e2e', 'runtime.json');
+import { test } from './m1-fixture.js';
+interface HealthSuccess {
+  readonly data: {
+    readonly status: string;
+    readonly database: string;
+    readonly scheduler: {
+      readonly status: string;
+      readonly active: number;
+      readonly capacity: number;
+      readonly queued: number;
+    };
+    readonly retention: { readonly lastRunAt: string | null; readonly status: string };
+    readonly resources: { readonly memoryPercent: number; readonly freeDiskBytes: number };
+  };
+}
 
 function collectConsoleErrors(page: Page): string[] {
   const errors: string[] = [];
@@ -33,10 +43,10 @@ function configuredBaseURL(testInfo: TestInfo): string {
   return baseURL;
 }
 
-function expectM0DegradedHealth(health: HealthSuccess): void {
+function expectM1InitializedHealth(health: HealthSuccess): void {
   expect(health.data).toMatchObject({
-    status: 'degraded',
-    database: 'not_initialized',
+    status: 'healthy',
+    database: 'ok',
     scheduler: {
       status: 'not_initialized',
       active: 0,
@@ -50,29 +60,13 @@ function expectM0DegradedHealth(health: HealthSuccess): void {
   });
 }
 
-async function getRecordedOrigin(): Promise<string> {
-  const metadata: unknown = JSON.parse(await readFile(runtimeMetadataPath, 'utf8'));
-
-  if (
-    typeof metadata !== 'object' ||
-    metadata === null ||
-    !('host' in metadata) ||
-    metadata.host !== '127.0.0.1' ||
-    !('port' in metadata) ||
-    typeof metadata.port !== 'number' ||
-    !Number.isSafeInteger(metadata.port)
-  ) {
-    throw new Error('The production runtime metadata did not contain a valid loopback origin.');
-  }
-
-  return `http://${metadata.host}:${metadata.port}`;
-}
-
-test('M0-E2E-001 renders truthful degraded health without console or critical axe errors', async ({
+test('M1-E2E-001 renders initialized database health without console or critical axe errors', async ({
   page,
+  orion,
 }, testInfo) => {
   const consoleErrors = collectConsoleErrors(page);
   const baseURL = configuredBaseURL(testInfo);
+  expect(orion.baseURL).toBe(baseURL);
   const healthResponsePromise = page.waitForResponse(
     (response) =>
       response.url() === `${baseURL}/api/v1/health` && response.request().method() === 'GET',
@@ -82,13 +76,14 @@ test('M0-E2E-001 renders truthful degraded health without console or critical ax
   const healthResponse = await healthResponsePromise;
 
   expect(healthResponse.status()).toBe(200);
-  const health = healthSuccessSchema.parse(await healthResponse.json());
-  expectM0DegradedHealth(health);
+  const health = (await healthResponse.json()) as HealthSuccess;
+  expectM1InitializedHealth(health);
   await expect(page.getByRole('heading', { name: 'Orion Console 대시보드' })).toBeVisible();
 
   const subsystems = page.getByRole('region', { name: 'M1 하위 시스템' });
-  await expect(subsystems.getByText('초기화되지 않음', { exact: true })).toHaveCount(3);
-  await expect(page.getByRole('region', { name: '서버 상태' })).toContainText('저하됨 (degraded)');
+  await expect(subsystems.getByText('정상 (ok)', { exact: true })).toHaveCount(1);
+  await expect(subsystems.getByText('초기화되지 않음', { exact: true })).toHaveCount(2);
+  await expect(page.getByRole('region', { name: '서버 상태' })).toContainText('정상 (healthy)');
 
   const resources = page.getByRole('region', { name: '리소스' });
   await expect(resources).toContainText(`${health.data.resources.memoryPercent}%`);
@@ -103,14 +98,16 @@ test('M0-E2E-001 renders truthful degraded health without console or critical ax
   expect(consoleErrors).toEqual([]);
 });
 
-test('M0-E2E-002 serves dashboard and health from the recorded production loopback origin', async ({
+test('M1-E2E-002 serves dashboard and health from the isolated production loopback origin', async ({
   page,
   request,
+  orion,
 }, testInfo) => {
   const consoleErrors = collectConsoleErrors(page);
-  const origin = await getRecordedOrigin();
+  const origin = orion.baseURL;
 
   expect(origin).toBe(configuredBaseURL(testInfo));
+  expect(orion.runtimeDirectory).not.toContain(process.cwd());
 
   const dashboardResponse = await request.get(origin, {
     headers: { accept: 'text/html' },
@@ -121,7 +118,7 @@ test('M0-E2E-002 serves dashboard and health from the recorded production loopba
 
   const healthResponse = await request.get(`${origin}/api/v1/health`);
   expect(healthResponse.status()).toBe(200);
-  expectM0DegradedHealth(healthSuccessSchema.parse(await healthResponse.json()));
+  expectM1InitializedHealth((await healthResponse.json()) as HealthSuccess);
 
   const apiPrecedenceResponse = await request.get(`${origin}/api/v1/not-a-route`);
   expect(apiPrecedenceResponse.status()).toBe(404);

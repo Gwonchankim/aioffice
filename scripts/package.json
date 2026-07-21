@@ -12,6 +12,7 @@
     "build": "pnpm --filter @orion/server build && tsc --project tsconfig.json"
   },
   "dependencies": {
+    "@orion/contracts": "workspace:*",
     "@orion/server": "workspace:*"
   }
 }

@@ -85,11 +85,16 @@ export function reportBrowserOpenFailure(
   logger: BrowserLogger,
   output: (value: string) => void,
 ): void {
+  const safeUrl = withoutFragment(actualUrl);
   logger.warn(
-    { code: 'BROWSER_OPEN_FAILED', url: actualUrl },
+    { code: 'BROWSER_OPEN_FAILED', url: safeUrl },
     'Browser opener failed; open the URL manually.',
   );
-  output(actualUrl);
+  output(safeUrl);
+}
+function withoutFragment(url: AbsoluteUrl): string {
+  const parsed = new URL(url);
+  return `${parsed.origin}${parsed.pathname === '/' ? '' : parsed.pathname}${parsed.search}`;
 }
 
 function spawnBrowser(
