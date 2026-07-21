@@ -1,19 +1,18 @@
 import { z } from 'zod';
 
-const utcIso8601Schema = z.string().datetime({ offset: false });
-const nonNegativeIntegerSchema = z.number().finite().int().nonnegative();
+import {
+  nonNegativeIntegerSchema,
+  nonNegativeSafeIntegerSchema,
+  utcIso8601Schema,
+} from './base.js';
+import { responseMetaSchema, successEnvelopeSchema } from './envelope.js';
 
 export const overallHealthStatusSchema = z.enum(['healthy', 'degraded', 'unhealthy']);
 export const databaseHealthStatusSchema = z.enum(['ok', 'not_initialized', 'error']);
 export const schedulerHealthStatusSchema = z.enum(['ok', 'not_initialized', 'error']);
 export const retentionHealthStatusSchema = z.enum(['ok', 'not_initialized', 'error']);
 
-export const healthMetaSchema = z
-  .object({
-    requestId: z.string().regex(/^[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$/),
-    timestamp: utcIso8601Schema,
-  })
-  .strict();
+export const healthMetaSchema = responseMetaSchema;
 
 export const schedulerHealthSchema = z
   .object({
@@ -27,7 +26,7 @@ export const schedulerHealthSchema = z
 export const resourcesHealthSchema = z
   .object({
     memoryPercent: z.number().finite().min(0).max(100),
-    freeDiskBytes: z.number().finite().int().safe().nonnegative(),
+    freeDiskBytes: nonNegativeSafeIntegerSchema,
   })
   .strict();
 
@@ -47,14 +46,6 @@ export const healthDataSchema = z
     retention: retentionHealthSchema,
   })
   .strict();
-
-export const successEnvelopeSchema = <DataSchema extends z.ZodTypeAny>(data: DataSchema) =>
-  z
-    .object({
-      data,
-      meta: healthMetaSchema,
-    })
-    .strict();
 
 export const healthSuccessSchema = successEnvelopeSchema(healthDataSchema);
 
