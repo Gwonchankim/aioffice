@@ -691,18 +691,22 @@
               "git": {
                 "type": "object",
                 "properties": {
+                  "defaultBranch": {
+                    "type": "string"
+                  },
+                  "currentBranch": {
+                    "type": "string",
+                    "nullable": true
+                  },
                   "headSha": {
                     "type": "string",
                     "pattern": "^[a-f0-9]{40}(?:[a-f0-9]{24})?$"
-                  },
-                  "branch": {
-                    "type": "string"
                   },
                   "dirty": {
                     "type": "boolean"
                   }
                 },
-                "required": ["headSha", "branch", "dirty"],
+                "required": ["defaultBranch", "currentBranch", "headSha", "dirty"],
                 "additionalProperties": false
               }
             },

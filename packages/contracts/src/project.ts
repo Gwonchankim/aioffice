@@ -194,8 +194,9 @@ export const projectIdParamsSchema = z.object({ id: ulidSchema }).strict();
 
 export const gitStatusSchema = z
   .object({
+    defaultBranch: branchSchema,
+    currentBranch: branchSchema.nullable(),
     headSha: z.string().regex(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/, 'Expected a Git commit SHA.'),
-    branch: branchSchema,
     dirty: z.boolean(),
   })
   .strict();

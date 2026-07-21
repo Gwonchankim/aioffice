@@ -55,6 +55,8 @@ export class ProjectRegistrationService {
         throw new ApplicationError('PROJECT_CONFLICT', 'The repository is already registered.', {
           statusCode: 409,
         });
+      const beforeCommit = this.git.snapshot(repositoryPath, parsed.defaultBranch);
+      this.assertUnchanged(after, beforeCommit);
       this.projects.insert(project);
       if (parsed.providerPolicy.allowFable) {
         this.confirmations.consume(
@@ -69,7 +71,7 @@ export class ProjectRegistrationService {
       this.projects.writeAudit('session', 'project.registered', project.id, {
         projectId: project.id,
       });
-      return { project, git: toGitStatus(after) };
+      return { project, git: toGitStatus(beforeCommit) };
     };
     return inImmediateTransaction ? persist() : withImmediateTransaction(this.database, persist);
   }
@@ -164,10 +166,13 @@ export class ProjectRegistrationService {
 
   private assertUnchanged(before: RepositorySnapshot, after: RepositorySnapshot): void {
     if (
+      before.defaultBranch !== after.defaultBranch ||
+      before.currentBranch !== after.currentBranch ||
       before.headSha !== after.headSha ||
-      before.branch !== after.branch ||
       before.dirty !== after.dirty ||
       before.indexHash !== after.indexHash ||
+      before.trackedHash !== after.trackedHash ||
+      before.untrackedHash !== after.untrackedHash ||
       before.filesHash !== after.filesHash
     ) {
       throw new ApplicationError(
@@ -187,5 +192,10 @@ function stripConfirmation(
   return patch;
 }
 function toGitStatus(status: GitStatus): GitStatus {
-  return { headSha: status.headSha, branch: status.branch, dirty: status.dirty };
+  return {
+    defaultBranch: status.defaultBranch,
+    currentBranch: status.currentBranch,
+    headSha: status.headSha,
+    dirty: status.dirty,
+  };
 }

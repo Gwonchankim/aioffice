@@ -104,6 +104,32 @@ describe('M1 OpenAPI contract', () => {
     expect(deleted.responses).toEqual(
       expect.objectContaining({ '409': expect.objectContaining({ content: expect.any(Object) }) }),
     );
+    const schemas = (
+      generated as {
+        components: {
+          schemas: {
+            ProjectWithGitStatusSuccess: {
+              properties: {
+                data: {
+                  properties: {
+                    git: { properties: Record<string, unknown>; required: string[] };
+                  };
+                };
+              };
+            };
+          };
+        };
+      }
+    ).components.schemas;
+    const gitStatus = schemas.ProjectWithGitStatusSuccess.properties.data.properties.git;
+    expect(gitStatus.properties).toMatchObject({
+      defaultBranch: { type: 'string' },
+      currentBranch: { type: 'string', nullable: true },
+      headSha: { type: 'string' },
+      dirty: { type: 'boolean' },
+    });
+    expect(gitStatus.required).toEqual(['defaultBranch', 'currentBranch', 'headSha', 'dirty']);
+    expect(gitStatus.properties).not.toHaveProperty('branch');
   });
 
   it('M1-API-002 keeps the generated operation set one-to-one with Fastify registration', async () => {

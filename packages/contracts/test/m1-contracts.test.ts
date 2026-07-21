@@ -502,14 +502,29 @@ describe('M1 shared contracts', () => {
         meta: { requestId: ids.event, timestamp },
       }).success,
     ).toBe(false);
+    const projectStatusResponse = {
+      data: {
+        project: validProject(),
+        git: {
+          defaultBranch: 'main',
+          currentBranch: null,
+          headSha: 'a'.repeat(40),
+          dirty: false,
+        },
+      },
+      meta: { requestId: ids.event, timestamp },
+    };
+    expect(
+      projectRouteRegistry.createProject.responses[201].safeParse(projectStatusResponse).success,
+    ).toBe(true);
     expect(
       projectRouteRegistry.createProject.responses[201].safeParse({
+        ...projectStatusResponse,
         data: {
-          project: validProject(),
-          git: { headSha: 'a'.repeat(40), branch: 'main', dirty: false },
+          ...projectStatusResponse.data,
+          git: { ...projectStatusResponse.data.git, branch: 'main' },
         },
-        meta: { requestId: ids.event, timestamp },
       }).success,
-    ).toBe(true);
+    ).toBe(false);
   });
 });

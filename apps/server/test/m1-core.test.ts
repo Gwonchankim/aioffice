@@ -1,5 +1,5 @@
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -624,17 +624,20 @@ describe('M1 database repositories', () => {
       ],
     ])
       expect(spawnSync('git', argv, { cwd: repository, shell: false }).status).toBe(0);
+    expect(
+      spawnSync('git', ['checkout', '-b', 'feature'], { cwd: repository, shell: false }).status,
+    ).toBe(0);
     writeFileSync(join(assets, 'index.html'), '<!doctype html>');
     const canonical = canonicalProjectPath(repository);
     const runner = new GitReadRunner(
       defaultTrustedGitExecutablePath(),
       join(tmpdir(), 'orion-git-runtime'),
     );
-    const indexBefore = readFileSync(join(repository, '.git', 'index'));
+    const indexBefore = readFileSync(resolvedFixtureIndex(repository));
     const snapshotBefore = runner.snapshot(canonical, 'main');
     const snapshotAfter = runner.snapshot(canonical, 'main');
     expect(snapshotAfter).toEqual(snapshotBefore);
-    expect(readFileSync(join(repository, '.git', 'index'))).toEqual(indexBefore);
+    expect(readFileSync(resolvedFixtureIndex(repository))).toEqual(indexBefore);
     expect(() => canonicalProjectPath('..\\bad')).toThrow();
     const app = await createApplication({
       assetRoot: assets,
@@ -761,7 +764,35 @@ describe('M1 database repositories', () => {
       payload: body,
     });
     expect(created.statusCode).toBe(201);
+    expect(created.json().data.git).toEqual(
+      expect.objectContaining({
+        defaultBranch: 'main',
+        currentBranch: 'feature',
+        dirty: false,
+      }),
+    );
+    expect(created.json().data.git).not.toHaveProperty('branch');
     const id = created.json().data.project.id as string;
+    const missingDefaultBranch = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/projects/${id}`,
+      headers: { ...mutation, 'idempotency-key': 'patch-missing-default' },
+      payload: { defaultBranch: 'missing-default' },
+    });
+    expect(missingDefaultBranch.statusCode).toBe(422);
+    expect(missingDefaultBranch.json()).toMatchObject({ error: { code: 'VALIDATION_FAILED' } });
+    runGit(repository, ['checkout', '--detach', 'HEAD']);
+    const detachedStatus = await app.inject({
+      method: 'GET',
+      url: `/api/v1/projects/${id}`,
+      headers: { host: headers.host, cookie },
+    });
+    expect(detachedStatus.statusCode).toBe(200);
+    expect(detachedStatus.json().data.git).toMatchObject({
+      defaultBranch: 'main',
+      currentBranch: null,
+      dirty: false,
+    });
     expect(
       (
         await app.inject({
@@ -957,6 +988,84 @@ describe('M1 database repositories', () => {
     expect(report.localOperationsP95Milliseconds).toBeLessThanOrEqual(300);
     expect(report.eventPersistenceP95Milliseconds).toBeLessThanOrEqual(100);
   });
+  it('AUD-M1-001 and AUD-M1-002 validate primary and linked worktrees without Git mutation', () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), 'orion-git-correction-'));
+    const primary = join(fixtureRoot, 'primary');
+    const linked = join(fixtureRoot, 'linked');
+    cleanup.push(fixtureRoot);
+    mkdirSync(primary);
+    writeFileSync(join(primary, 'tracked.txt'), 'tracked');
+
+    for (const argv of [
+      ['init', '-b', 'main'],
+      ['add', 'tracked.txt'],
+      [
+        '-c',
+        'user.name=Fixture',
+        '-c',
+        'user.email=fixture@example.invalid',
+        'commit',
+        '-m',
+        'fixture',
+      ],
+      ['checkout', '-b', 'feature'],
+    ])
+      runGit(primary, argv);
+    runGit(primary, ['worktree', 'add', '-b', 'linked', linked, 'main']);
+    writeFileSync(join(linked, 'dirty.txt'), 'dirty');
+
+    const runner = new GitReadRunner(
+      defaultTrustedGitExecutablePath(),
+      join(tmpdir(), 'orion-git-correction-runtime'),
+    );
+    const primaryPath = canonicalProjectPath(primary);
+    const linkedPath = canonicalProjectPath(linked);
+    const primaryBefore = gitFixtureEvidence(primary, runner);
+    const linkedBefore = gitFixtureEvidence(linked, runner);
+    const linkedPointerBefore = readFileSync(join(linked, '.git'));
+
+    expect(primaryBefore.snapshot).toMatchObject({
+      defaultBranch: 'main',
+      currentBranch: 'feature',
+      dirty: false,
+    });
+    expect(linkedBefore.snapshot).toMatchObject({
+      defaultBranch: 'main',
+      currentBranch: 'linked',
+      dirty: true,
+    });
+    expect(runner.validate(linkedPath, 'main')).toMatchObject({
+      defaultBranch: 'main',
+      currentBranch: 'linked',
+      dirty: true,
+    });
+    expect(() => runner.validate(primaryPath, 'missing-default')).toThrow(
+      expect.objectContaining({ code: 'VALIDATION_FAILED', statusCode: 422 }),
+    );
+
+    expect(() => canonicalProjectPath('\\\\server\\share\\repository')).toThrow();
+    expect(() => canonicalProjectPath('\\\\?\\C:\\device')).toThrow();
+    expect(() => canonicalProjectPath('\\\\.\\PhysicalDrive0')).toThrow();
+    const junction = join(fixtureRoot, 'primary-junction');
+    symlinkSync(primary, junction, 'junction');
+    expect(() => canonicalProjectPath(junction)).toThrow();
+
+    const primaryAfter = gitFixtureEvidence(primary, runner);
+    const linkedAfter = gitFixtureEvidence(linked, runner);
+    expect(primaryAfter).toEqual(primaryBefore);
+    expect(linkedAfter).toEqual(linkedBefore);
+    expect(readFileSync(join(linked, '.git'))).toEqual(linkedPointerBefore);
+
+    runGit(primary, ['checkout', '--detach', 'HEAD']);
+    const detachedBefore = gitFixtureEvidence(primary, runner);
+    expect(runner.validate(primaryPath, 'main')).toMatchObject({
+      defaultBranch: 'main',
+      currentBranch: null,
+      headSha: detachedBefore.snapshot.headSha,
+      dirty: false,
+    });
+    expect(gitFixtureEvidence(primary, runner)).toEqual(detachedBefore);
+  }, 20_000);
 });
 async function measureAsyncMilliseconds(operation: () => Promise<void>): Promise<number> {
   const started = performance.now();
@@ -972,4 +1081,29 @@ function measureMilliseconds(operation: () => void): number {
 function percentile95(samples: readonly number[]): number {
   const ordered = [...samples].sort((left, right) => left - right);
   return ordered[Math.ceil(ordered.length * 0.95) - 1] ?? 0;
+}
+function runGit(root: string, argv: readonly string[]): void {
+  expect(spawnSync('git', argv, { cwd: root, shell: false }).status).toBe(0);
+}
+
+function gitFixtureEvidence(root: string, runner: GitReadRunner) {
+  return {
+    snapshot: runner.snapshot(canonicalProjectPath(root), 'main'),
+    indexBytes: readFileSync(resolvedFixtureIndex(root)),
+  };
+}
+
+function resolvedFixtureIndex(root: string): string {
+  const result = spawnSync('git', ['--no-optional-locks', 'rev-parse', '--git-path', 'index'], {
+    cwd: root,
+    encoding: 'utf8',
+    shell: false,
+  });
+  expect(result.status).toBe(0);
+  const output = result.stdout.endsWith('\r\n')
+    ? result.stdout.slice(0, -2)
+    : result.stdout.endsWith('\n')
+      ? result.stdout.slice(0, -1)
+      : result.stdout;
+  return isAbsolute(output) ? output : resolve(root, output);
 }
