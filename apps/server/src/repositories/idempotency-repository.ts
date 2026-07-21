@@ -53,6 +53,18 @@ export class IdempotencyRepository {
       return { kind: 'reserved' };
     });
   }
+  public completeWithMutation<T extends { readonly statusCode: number; readonly body: unknown }>(
+    scopeHash: string,
+    operation: string,
+    keyHash: string,
+    work: () => T,
+  ): T {
+    return withImmediateTransaction(this.database, () => {
+      const result = work();
+      this.complete(scopeHash, operation, keyHash, result.statusCode, result.body);
+      return result;
+    });
+  }
 
   public complete(
     scopeHash: string,

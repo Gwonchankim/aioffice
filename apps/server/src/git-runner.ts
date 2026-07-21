@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { ApplicationError } from './errors.js';
@@ -17,11 +17,15 @@ export interface RepositorySnapshot extends GitStatus {
 }
 
 export class GitReadRunner {
+  private readonly executable: string;
+
   public constructor(
-    private readonly executable = 'git',
+    executable: string,
     private readonly runtimeDirectory: string,
     private readonly baseEnvironment: NodeJS.ProcessEnv = process.env,
-  ) {}
+  ) {
+    this.executable = resolveTrustedGitExecutable(executable);
+  }
 
   public validate(root: string, branch: string): GitStatus {
     if (
@@ -85,6 +89,24 @@ export class GitReadRunner {
     });
     if (result.status !== 0 || result.error !== undefined) throw invalidRepository();
     return result.stdout.trim();
+  }
+}
+export function resolveTrustedGitExecutable(executable: string): string {
+  if (!isAbsolute(executable)) {
+    throw new ApplicationError(
+      'DATABASE_CONFIGURATION_FAILED',
+      'The configured Git executable must be an absolute trusted path.',
+    );
+  }
+  try {
+    const canonical = realpathSync.native(executable);
+    if (!existsSync(canonical) || !lstatSync(canonical).isFile()) throw new Error('not a file');
+    return canonical;
+  } catch {
+    throw new ApplicationError(
+      'DATABASE_CONFIGURATION_FAILED',
+      'The configured Git executable is not available.',
+    );
   }
 }
 

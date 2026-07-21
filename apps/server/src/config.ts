@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { join, resolve } from 'node:path';
 
 import { ApplicationError } from './errors.js';
+import { resolveTrustedGitExecutable } from './git-runner.js';
 
 export const LOOPBACK_HOST = '127.0.0.1' as const;
 export const DEFAULT_PORT = 4317;
@@ -15,6 +16,7 @@ export interface ServerConfig {
   readonly assetRoot: string;
   readonly port: number;
   readonly runtimeDirectory: string;
+  readonly gitExecutable?: string;
 }
 
 export function loadServerConfig(environment: NodeJS.ProcessEnv = process.env): ServerConfig {
@@ -22,7 +24,16 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv = process.env): 
     assetRoot: DEFAULT_ASSET_ROOT,
     port: parsePort(environment.ORION_PORT),
     runtimeDirectory: resolveRuntimeDirectory(environment),
+    gitExecutable: resolveTrustedGitExecutable(
+      environment.ORION_GIT_EXECUTABLE ?? defaultTrustedGitExecutablePath(environment),
+    ),
   };
+}
+
+export function defaultTrustedGitExecutablePath(
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(environment.ProgramFiles ?? 'C:\\Program Files', 'Git', 'cmd', 'git.exe');
 }
 
 function parsePort(value: string | undefined): number {

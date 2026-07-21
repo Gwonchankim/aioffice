@@ -56,6 +56,7 @@ export async function startServer(
     const application = await (dependencies.appFactory ?? createApplication)({
       assetRoot: config.assetRoot,
       runtimeDirectory: config.runtimeDirectory,
+      ...(config.gitExecutable === undefined ? {} : { gitExecutable: config.gitExecutable }),
       ...(database === undefined ? {} : { database: database.database, loopbackPort: config.port }),
       logger,
     });

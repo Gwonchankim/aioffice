@@ -3,6 +3,7 @@ import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 import { ulid } from 'ulid';
 
 import { getErrorCode, ApplicationError } from './errors.js';
+import { defaultTrustedGitExecutablePath } from './config.js';
 import { registerHealthRoute } from './health.js';
 import { IdempotencyService } from './idempotency.js';
 import { ProjectPolicyService } from './project-policy.js';
@@ -21,6 +22,7 @@ import { registerStaticSpa } from './static-spa.js';
 export interface CreateApplicationOptions {
   readonly assetRoot: string;
   readonly runtimeDirectory: string;
+  readonly gitExecutable?: string;
   readonly database?: DatabaseSync;
   readonly loopbackPort?: number;
   readonly bootstrapToken?: string;
@@ -46,21 +48,28 @@ export async function createApplication(
     if (options.database === undefined && code === 'HEALTH_RESOURCE_MEASUREMENT_FAILED') {
       return reply.code(503).send({ error: { code } });
     }
-    const knownCode = normalizeErrorCode(code);
     const applicationError = error instanceof ApplicationError ? error : undefined;
-    return reply
-      .code(
-        applicationError?.statusCode ?? (code === 'HEALTH_RESOURCE_MEASUREMENT_FAILED' ? 503 : 500),
-      )
-      .send({
-        error: {
-          code: knownCode,
-          message: applicationError?.message ?? 'The local request could not be completed.',
-          ...(applicationError?.details === undefined ? {} : { details: applicationError.details }),
-          retryable: applicationError?.retryable ?? false,
-        },
-        meta: { requestId: requestId(), timestamp: now().toISOString() },
-      });
+    const knownCode = isRouteValidationError(error)
+      ? 'VALIDATION_FAILED'
+      : normalizeErrorCode(code);
+    const statusCode =
+      applicationError?.statusCode ??
+      (knownCode === 'VALIDATION_FAILED'
+        ? 422
+        : knownCode === 'IDEMPOTENCY_REQUIRED'
+          ? 400
+          : code === 'HEALTH_RESOURCE_MEASUREMENT_FAILED'
+            ? 503
+            : 500);
+    return reply.code(statusCode).send({
+      error: {
+        code: knownCode,
+        message: applicationError?.message ?? 'The local request could not be completed.',
+        ...(applicationError?.details === undefined ? {} : { details: applicationError.details }),
+        retryable: applicationError?.retryable ?? false,
+      },
+      meta: { requestId: requestId(), timestamp: now().toISOString() },
+    });
   });
 
   const healthRouteOptions = {
@@ -114,7 +123,10 @@ export async function createApplication(
       projects,
       confirmations,
       new ProjectPolicyService(),
-      new GitReadRunner('git', options.runtimeDirectory),
+      new GitReadRunner(
+        options.gitExecutable ?? defaultTrustedGitExecutablePath(),
+        options.runtimeDirectory,
+      ),
       undefined,
       now,
     );
@@ -143,6 +155,12 @@ function databaseHealthy(database: DatabaseSync): 'ok' | 'error' {
   }
 }
 
+function isRouteValidationError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  if (error instanceof Error && error.name === 'ZodError') return true;
+  return 'validation' in error || ('code' in error && String(error.code).startsWith('FST_ERR_'));
+}
+
 function normalizeErrorCode(code: string): string {
   const known = new Set([
     'BAD_REQUEST',
@@ -150,6 +168,7 @@ function normalizeErrorCode(code: string): string {
     'ORIGIN_REJECTED',
     'HOST_REJECTED',
     'CSRF_REJECTED',
+    'IDEMPOTENCY_REQUIRED',
     'NOT_FOUND',
     'PERMISSION_DENIED',
     'VALIDATION_FAILED',

@@ -29,7 +29,11 @@ export class ProjectRegistrationService {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
-  public register(input: ProjectRegistrationInput, sessionScopeHash: string): ProjectWithGitStatus {
+  public register(
+    input: ProjectRegistrationInput,
+    sessionScopeHash: string,
+    inImmediateTransaction = false,
+  ): ProjectWithGitStatus {
     const parsed = projectRegistrationInputSchema.parse(input);
     const repositoryPath = this.canonicalize(parsed.repositoryPath);
     const before = this.git.snapshot(repositoryPath, parsed.defaultBranch);
@@ -46,7 +50,7 @@ export class ProjectRegistrationService {
     const project = this.createProject(parsed, repositoryPath, id);
     const after = this.git.snapshot(repositoryPath, parsed.defaultBranch);
     this.assertUnchanged(before, after);
-    return withImmediateTransaction(this.database, () => {
+    const persist = () => {
       if (this.projects.findActiveByPath(repositoryPath) !== undefined)
         throw new ApplicationError('PROJECT_CONFLICT', 'The repository is already registered.', {
           statusCode: 409,
@@ -66,13 +70,15 @@ export class ProjectRegistrationService {
         projectId: project.id,
       });
       return { project, git: toGitStatus(after) };
-    });
+    };
+    return inImmediateTransaction ? persist() : withImmediateTransaction(this.database, persist);
   }
 
   public update(
     id: string,
     patch: ProjectUpdateInput,
     sessionScopeHash: string,
+    inImmediateTransaction = false,
   ): ProjectWithGitStatus {
     const parsed = projectUpdateInputSchema.parse(patch);
     const current = this.projects.findActiveById(id);
@@ -99,7 +105,7 @@ export class ProjectRegistrationService {
       ) > 0;
     this.policy.assertUpdatePolicy(current, candidate, active);
     const git = this.git.validate(current.repositoryPath, candidate.defaultBranch);
-    return withImmediateTransaction(this.database, () => {
+    const persist = () => {
       const project = this.projects.update(id, parsed);
       if (parsed.providerPolicy?.allowFable) {
         this.confirmations.consume(
@@ -113,7 +119,8 @@ export class ProjectRegistrationService {
       }
       this.projects.writeAudit('session', 'project.updated', id, { projectId: id });
       return { project, git: toGitStatus(git) };
-    });
+    };
+    return inImmediateTransaction ? persist() : withImmediateTransaction(this.database, persist);
   }
 
   public status(id: string): ProjectWithGitStatus {
@@ -126,8 +133,11 @@ export class ProjectRegistrationService {
     };
   }
 
-  public unregister(id: string): ReturnType<ProjectRepository['unregisterWithBlockers']> {
-    return this.projects.unregisterWithBlockers(id);
+  public unregister(
+    id: string,
+    inImmediateTransaction = false,
+  ): ReturnType<ProjectRepository['unregisterWithBlockers']> {
+    return this.projects.unregisterWithBlockers(id, inImmediateTransaction);
   }
 
   private createProject(

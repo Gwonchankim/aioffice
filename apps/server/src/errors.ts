@@ -104,6 +104,8 @@ function defaultStatus(code: ApplicationErrorCode): number {
     case 'INVALID_STATE_TRANSITION':
     case 'IMMUTABLE_PROFILE_SNAPSHOT':
       return 409;
+    case 'IDEMPOTENCY_REQUIRED':
+      return 400;
     case 'VALIDATION_FAILED':
       return 422;
     case 'HEALTH_RESOURCE_MEASUREMENT_FAILED':

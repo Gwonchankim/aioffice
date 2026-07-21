@@ -68,6 +68,18 @@ export class ArcaArchiveApprovalConsumer {
           statusCode: 409,
         });
       this.registry.archiveApproved(parsed.sourceId, parsed.expectedMetadataVersion);
+      this.registry.writeAudit({
+        actor: 'system',
+        action: 'source_archived',
+        sourceId: parsed.sourceId,
+        requestId: null,
+        projectId: parsed.projectId,
+        purpose: 'archive-approval',
+        decision: 'allow',
+        policyVersion: 'm1',
+        connectorType: null,
+        timestamp,
+      });
     });
   }
 }

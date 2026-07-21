@@ -3,6 +3,7 @@ import {
   type AgentProfileSkeleton,
   type DataClassification,
   type Project,
+  type Provider,
   type ProviderPolicy,
 } from '@orion/contracts';
 import { agentProfileSeedSkeletons, validateProfilePermissions } from '@orion/agent-catalog';
@@ -31,6 +32,10 @@ export function canonicalJson(value: unknown): string {
 
 export function providerPolicyHash(policy: ProviderPolicy): string {
   return createHash('sha256').update(canonicalJson(policy)).digest('hex');
+}
+export interface EffectiveProviderModel {
+  readonly provider: Provider;
+  readonly model: string;
 }
 
 export class ProjectPolicyService {
@@ -105,16 +110,29 @@ export class ProjectPolicyService {
     }
   }
 
+  public effectiveModels(
+    project: Pick<Project, 'providerPolicy'>,
+    profile: AgentProfileSkeleton,
+  ): readonly EffectiveProviderModel[] {
+    if (!validateProfilePermissions(profile)) return [];
+    const candidates: readonly EffectiveProviderModel[] = [
+      { provider: profile.provider, model: profile.model },
+      ...profile.fallbackModels,
+    ];
+    return candidates.filter(
+      (candidate) =>
+        project.providerPolicy[candidate.provider] &&
+        (project.providerPolicy.allowFable || !isFableModel(candidate.model)),
+    );
+  }
+
   public effectiveProviders(
     project: Pick<Project, 'providerPolicy'>,
     profile: AgentProfileSkeleton,
-  ): readonly ('openai' | 'anthropic')[] {
-    if (!validateProfilePermissions(profile)) return [];
-    const candidates: ('openai' | 'anthropic')[] = [
-      profile.provider,
-      ...profile.fallbackModels.map((model) => model.provider),
+  ): readonly Provider[] {
+    return [
+      ...new Set(this.effectiveModels(project, profile).map((candidate) => candidate.provider)),
     ];
-    return [...new Set(candidates.filter((provider) => project.providerPolicy[provider]))];
   }
 
   private expandsList(current: readonly string[], next: readonly string[]): boolean {
@@ -133,4 +151,7 @@ export class ProjectPolicyService {
       ),
     );
   }
+}
+function isFableModel(model: string): boolean {
+  return /fable/i.test(model);
 }

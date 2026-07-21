@@ -160,12 +160,15 @@ export class ProjectRepository {
     return projectSchema.parse({ ...current, updatedAt: timestamp, unregisteredAt: timestamp });
   }
 
-  public unregisterWithBlockers(id: string): {
+  public unregisterWithBlockers(
+    id: string,
+    inImmediateTransaction = false,
+  ): {
     readonly project: Project;
     readonly tasks: readonly { id: string; status: string }[];
     readonly worktrees: readonly WorktreeBlocker[];
   } {
-    return withImmediateTransaction(this.database, () => {
+    const unregister = () => {
       const project = this.findActiveById(id);
       if (project === undefined) {
         throw new ApplicationError('NOT_FOUND', 'The requested project is not registered.');
@@ -188,7 +191,10 @@ export class ProjectRepository {
       const unregistered = this.softUnregister(id);
       this.writeAudit('system', 'project.unregistered', id, { projectId: id });
       return { project: unregistered, tasks, worktrees: [] };
-    });
+    };
+    return inImmediateTransaction
+      ? unregister()
+      : withImmediateTransaction(this.database, unregister);
   }
 
   public writeAudit(

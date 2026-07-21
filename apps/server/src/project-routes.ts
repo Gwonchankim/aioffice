@@ -68,7 +68,7 @@ export function registerProjectRoutes(
         'Fable confirmations only acknowledge Fable-enabled policies.',
         { statusCode: 422 },
       );
-    const result = await dependencies.idempotency.execute(
+    const result = await dependencies.idempotency.executeAtomic(
       session.scopeHash,
       'fable-confirmation',
       idempotencyKey(request),
@@ -103,14 +103,17 @@ export function registerProjectRoutes(
   app.post('/api/v1/projects', async (request, reply) => {
     const session = requireMutationSession(request, dependencies.security);
     const body = projectRegistrationInputSchema.parse(request.body);
-    const result = await dependencies.idempotency.execute(
+    const result = await dependencies.idempotency.executeAtomic(
       session.scopeHash,
       'projects.create',
       idempotencyKey(request),
       body,
       () => ({
         statusCode: 201,
-        body: { data: dependencies.registration.register(body, session.scopeHash), meta: meta() },
+        body: {
+          data: dependencies.registration.register(body, session.scopeHash, true),
+          meta: meta(),
+        },
       }),
     );
     return reply.code(result.statusCode).send(result.body);
@@ -120,7 +123,7 @@ export function registerProjectRoutes(
     const session = requireMutationSession(request, dependencies.security);
     const params = projectIdParamsSchema.parse(request.params);
     const body = projectUpdateInputSchema.parse(request.body);
-    const result = await dependencies.idempotency.execute(
+    const result = await dependencies.idempotency.executeAtomic(
       session.scopeHash,
       `projects.update:${params.id}`,
       idempotencyKey(request),
@@ -128,7 +131,7 @@ export function registerProjectRoutes(
       () => ({
         statusCode: 200,
         body: {
-          data: dependencies.registration.update(params.id, body, session.scopeHash),
+          data: dependencies.registration.update(params.id, body, session.scopeHash, true),
           meta: meta(),
         },
       }),
@@ -140,13 +143,13 @@ export function registerProjectRoutes(
     const session = requireMutationSession(request, dependencies.security);
     const params = projectIdParamsSchema.parse(request.params);
     const body = projectDeleteInputSchema.parse(request.body ?? {});
-    const result = await dependencies.idempotency.execute(
+    const result = await dependencies.idempotency.executeAtomic(
       session.scopeHash,
       `projects.delete:${params.id}`,
       idempotencyKey(request),
       body,
       () => {
-        const outcome = dependencies.registration.unregister(params.id);
+        const outcome = dependencies.registration.unregister(params.id, true);
         if (outcome.tasks.length > 0) {
           return {
             statusCode: 409,

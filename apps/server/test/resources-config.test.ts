@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_ASSET_ROOT, DEFAULT_PORT, loadServerConfig } from '../src/config.js';
+import {
+  DEFAULT_ASSET_ROOT,
+  DEFAULT_PORT,
+  defaultTrustedGitExecutablePath,
+  loadServerConfig,
+} from '../src/config.js';
 import { SystemResourceReader } from '../src/resources.js';
 function thrownBy(operation: () => void): unknown {
   try {
@@ -24,7 +29,16 @@ describe('server configuration and system resources', () => {
       assetRoot: DEFAULT_ASSET_ROOT,
       port: 4444,
       runtimeDirectory: 'C:\\runtime-test',
+      gitExecutable: defaultTrustedGitExecutablePath(),
     });
+    expect(
+      thrownBy(() =>
+        loadServerConfig({
+          LOCALAPPDATA: 'C:\\runtime',
+          ORION_GIT_EXECUTABLE: 'git',
+        }),
+      ),
+    ).toMatchObject({ code: 'DATABASE_CONFIGURATION_FAILED' });
     expect(
       thrownBy(() => loadServerConfig({ LOCALAPPDATA: 'C:\\runtime', ORION_PORT: '0' })),
     ).toMatchObject({

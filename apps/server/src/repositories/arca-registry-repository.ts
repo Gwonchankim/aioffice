@@ -24,6 +24,56 @@ export interface RegistryScope {
   readonly policyVersion: string;
   readonly allowedOperations: readonly string[];
 }
+export interface ArcaAuditMetadata {
+  readonly actor: string;
+  readonly action: string;
+  readonly sourceId: string | null;
+  readonly requestId: string | null;
+  readonly projectId: string | null;
+  readonly purpose: string;
+  readonly decision: 'allow' | 'deny';
+  readonly policyVersion: string;
+  readonly connectorType: string | null;
+  readonly timestamp: string;
+  readonly locator?: string;
+  readonly excerptStart?: number;
+  readonly excerptEnd?: number;
+  readonly contentHash?: string;
+}
+
+type AuditSupplement = Partial<
+  Pick<
+    ArcaAuditMetadata,
+    'connectorType' | 'locator' | 'excerptStart' | 'excerptEnd' | 'contentHash'
+  >
+>;
+
+const auditActions = new Set([
+  'source_registered',
+  'source_lookup_not_found',
+  'source_request_created',
+  'source_request_resolved',
+  'source_request_cancelled',
+  'source_lifecycle_changed',
+  'source_archived',
+]);
+const auditKeys = new Set([
+  'actor',
+  'action',
+  'sourceId',
+  'requestId',
+  'projectId',
+  'purpose',
+  'decision',
+  'policyVersion',
+  'connectorType',
+  'timestamp',
+  'locator',
+  'excerptStart',
+  'excerptEnd',
+  'contentHash',
+]);
+const connectorTypes = new Set(['local-folder', 'registered-git', 'google-drive', 'nas']);
 
 const classificationRank = { public: 0, internal: 1, confidential: 2, controlled: 3 } as const;
 
@@ -71,9 +121,15 @@ export class ArcaRegistryRepository {
         this.updateCardStatus(predecessor, 'superseded', predecessor.metadataVersion);
       }
       this.insertCard(card);
-      this.writeAudit(scope, 'source_registered', card.sourceId, null, card.projectId, 'allow', {
-        connectorType: card.connectorType,
-      });
+      this.writeScopedAudit(
+        scope,
+        'source_registered',
+        card.sourceId,
+        null,
+        card.projectId,
+        'allow',
+        { connectorType: card.connectorType },
+      );
       return card;
     });
   }
@@ -84,7 +140,7 @@ export class ArcaRegistryRepository {
     ]);
     const card = cards[0];
     if (card === undefined) {
-      this.writeAudit(scope, 'source_lookup_not_found', null, null, null, 'deny', {});
+      this.writeScopedAudit(scope, 'source_lookup_not_found', null, null, null, 'deny', {});
     }
     return card;
   }
@@ -129,7 +185,7 @@ export class ArcaRegistryRepository {
         request.requesterRole,
         request.requestedAt,
       );
-    this.writeAudit(
+    this.writeScopedAudit(
       scope,
       'source_request_created',
       null,
@@ -187,7 +243,7 @@ export class ArcaRegistryRepository {
         status: 'resolved',
         metadataVersion: request.metadataVersion + 1,
       });
-      this.writeAudit(
+      this.writeScopedAudit(
         scope,
         'source_request_resolved',
         sourceId,
@@ -233,7 +289,7 @@ export class ArcaRegistryRepository {
         status: 'cancelled',
         metadataVersion: request.metadataVersion + 1,
       });
-      this.writeAudit(
+      this.writeScopedAudit(
         scope,
         'source_request_cancelled',
         null,
@@ -271,7 +327,7 @@ export class ArcaRegistryRepository {
         status: to,
         metadataVersion: card.metadataVersion + 1,
       });
-      this.writeAudit(
+      this.writeScopedAudit(
         scope,
         'source_lifecycle_changed',
         card.sourceId,
@@ -304,25 +360,14 @@ export class ArcaRegistryRepository {
     });
   }
 
-  public writeAudit(
-    scope: RegistryScope,
-    action: string,
-    sourceId: string | null,
-    requestId: string | null,
-    projectId: string | null,
-    decision: 'allow' | 'deny',
-    metadata: Record<string, unknown>,
-  ): void {
-    if (
-      Object.keys(metadata).some((key) =>
-        /raw|excerpt|credential|token|secret|prompt|log/i.test(key),
-      )
-    )
-      throw new ApplicationError(
-        'VALIDATION_FAILED',
-        'Raw source data cannot be written to registry audit.',
-        { statusCode: 422 },
-      );
+  public writeAudit(entry: ArcaAuditMetadata): void {
+    const parsed = parseAuditMetadata(entry);
+    const metadata = {
+      ...(parsed.locator === undefined ? {} : { locator: parsed.locator }),
+      ...(parsed.excerptStart === undefined ? {} : { excerptStart: parsed.excerptStart }),
+      ...(parsed.excerptEnd === undefined ? {} : { excerptEnd: parsed.excerptEnd }),
+      ...(parsed.contentHash === undefined ? {} : { contentHash: parsed.contentHash }),
+    };
     this.database
       .prepare(
         `INSERT INTO registry_audit_log (id, actor, action, source_id, request_id, project_id, purpose, decision, policy_version, connector_type, metadata_json, created_at)
@@ -330,18 +375,45 @@ export class ArcaRegistryRepository {
       )
       .run(
         this.ids(),
-        scope.actor,
-        action,
-        sourceId,
-        requestId,
-        projectId,
-        scope.purpose,
-        decision,
-        scope.policyVersion,
-        typeof metadata.connectorType === 'string' ? metadata.connectorType : null,
+        parsed.actor,
+        parsed.action,
+        parsed.sourceId,
+        parsed.requestId,
+        parsed.projectId,
+        parsed.purpose,
+        parsed.decision,
+        parsed.policyVersion,
+        parsed.connectorType,
         JSON.stringify(metadata),
-        this.now().toISOString(),
+        parsed.timestamp,
       );
+  }
+
+  private writeScopedAudit(
+    scope: RegistryScope,
+    action: string,
+    sourceId: string | null,
+    requestId: string | null,
+    projectId: string | null,
+    decision: 'allow' | 'deny',
+    metadata: AuditSupplement,
+  ): void {
+    this.writeAudit({
+      actor: scope.actor,
+      action,
+      sourceId,
+      requestId,
+      projectId,
+      purpose: scope.purpose,
+      decision,
+      policyVersion: scope.policyVersion,
+      connectorType: metadata.connectorType ?? null,
+      timestamp: this.now().toISOString(),
+      ...(metadata.locator === undefined ? {} : { locator: metadata.locator }),
+      ...(metadata.excerptStart === undefined ? {} : { excerptStart: metadata.excerptStart }),
+      ...(metadata.excerptEnd === undefined ? {} : { excerptEnd: metadata.excerptEnd }),
+      ...(metadata.contentHash === undefined ? {} : { contentHash: metadata.contentHash }),
+    });
   }
 
   private insertCard(card: SourceCard): void {
@@ -581,4 +653,68 @@ function allowedCardTransition(from: SourceCardStatus, to: SourceCardStatus): bo
       archived: [],
     } as Record<SourceCardStatus, readonly SourceCardStatus[]>
   )[from].includes(to);
+}
+function parseAuditMetadata(entry: ArcaAuditMetadata): ArcaAuditMetadata {
+  if (
+    typeof entry !== 'object' ||
+    entry === null ||
+    Object.keys(entry).some((key) => !auditKeys.has(key)) ||
+    Object.values(entry).some((value) => typeof value === 'object' && value !== null)
+  ) {
+    throw invalidAuditMetadata();
+  }
+  if (
+    !isAuditString(entry.actor, 128) ||
+    !auditActions.has(entry.action) ||
+    !isNullableAuditString(entry.sourceId, 128) ||
+    !isNullableAuditString(entry.requestId, 128) ||
+    !isNullableAuditString(entry.projectId, 128) ||
+    !isAuditString(entry.purpose, 500) ||
+    (entry.decision !== 'allow' && entry.decision !== 'deny') ||
+    !isAuditString(entry.policyVersion, 128) ||
+    (entry.connectorType !== null &&
+      (typeof entry.connectorType !== 'string' || !connectorTypes.has(entry.connectorType))) ||
+    !isUtcTimestamp(entry.timestamp) ||
+    (entry.locator !== undefined && !isAuditString(entry.locator, 2048)) ||
+    (entry.excerptStart !== undefined && !isNonNegativeInteger(entry.excerptStart)) ||
+    (entry.excerptEnd !== undefined && !isNonNegativeInteger(entry.excerptEnd)) ||
+    (entry.excerptStart !== undefined &&
+      entry.excerptEnd !== undefined &&
+      entry.excerptEnd < entry.excerptStart) ||
+    (entry.contentHash !== undefined &&
+      (typeof entry.contentHash !== 'string' ||
+        !/^(?:sha256:)?[a-f0-9]{64}$/.test(entry.contentHash)))
+  ) {
+    throw invalidAuditMetadata();
+  }
+  return entry;
+}
+
+function isAuditString(value: unknown, maximum: number): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= maximum;
+}
+
+function isNullableAuditString(value: unknown, maximum: number): value is string | null {
+  return value === null || isAuditString(value, maximum);
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isUtcTimestamp(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.endsWith('Z') &&
+    !Number.isNaN(Date.parse(value)) &&
+    new Date(value).toISOString() === value
+  );
+}
+
+function invalidAuditMetadata(): ApplicationError {
+  return new ApplicationError(
+    'VALIDATION_FAILED',
+    'Registry audit accepts approved metadata fields only.',
+    { statusCode: 422 },
+  );
 }
