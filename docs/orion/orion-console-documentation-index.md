@@ -22,10 +22,13 @@
 | 보안 기준 | [Security, Permission & Data Classification](./orion-console-security-permission-model.md) | 위협 모델, 자료 등급, 명령·파일·Git 권한, 승인, 비밀정보, 감사, 사고 대응 | 보안 책임자, 전체 개발팀 |
 | 화면 기준 | [UI/UX Specification](./orion-console-ui-ux-specification.md) | 정보 구조, 핵심 화면, 상태·오류 표시, 접근성, 반응형 범위, 2D 오피스 후순위 원칙 | 프론트엔드, 디자인, QA |
 | 검증 기준 | [Test & Evaluation Plan](./orion-console-test-evaluation-plan.md) | 요구사항 추적, 기능·복구·보안·성능 시험, 에이전트 역할 평가, 출시 점수 | QA, 제품 책임자 |
-| AI 개발 실행 | [AI Development Prompt Playbook](./orion-console-ai-development-prompt-playbook.md) | 계획·검토·구현·검증·완성 단계별 입력 문서, 복사용 프롬프트, gate와 handoff 형식 | 모든 AI 작업자, 기술 총괄 |
-| 실행 계획 | [Implementation Roadmap](./orion-console-implementation-roadmap.md) | M0~M8 단계, 단계별 기능·방법·검증·완료 조건·출시 체크리스트 | 기술 총괄, 프로젝트 관리자 |
+| AI 개발 실행 | [AI Development Prompt Playbook](./orion-console-ai-development-prompt-playbook.md) | P1 PLAN, P2 REVIEW, P3 IMPLEMENT, P4 VALIDATE, P5 COMPLETE 입력 문서, 복사용 프롬프트, gate와 handoff 형식 | 모든 AI 작업자, 기술 총괄 |
+| 실행 계획 | [Implementation Roadmap](./orion-console-implementation-roadmap.md) | M0-M8 roadmap milestones, milestone별 기능·방법·검증·완료 조건·출시 체크리스트 | 기술 총괄, 프로젝트 관리자 |
 | 운영 기준 | [Operations & Recovery Runbook](./orion-console-operations-recovery-runbook.md) | 설치·실행·중지, 장애 진단, 작업·Git·DB 복구, 백업, 업데이트, 제거 | 운영자, 개발자 |
 | 결정 기록 | [Architecture Decision Records](./orion-console-architecture-decision-records.md) | 로컬 우선, CLI 어댑터, SSE, SQLite, worktree, 승인, 자료 등급, 스케줄러 등 핵심 결정 | 아키텍트, 유지보수자 |
+Technical Specification §20 uses TS00 through TS10.
+
+Workflow phases are P1 PLAN, P2 REVIEW, P3 IMPLEMENT, P4 VALIDATE, and P5 COMPLETE.
 
 ## 3. 권장 읽기 순서
 
@@ -71,7 +74,7 @@
 | 허용·차단·승인·자료 반출·보존과 관련된 모든 판단 | Security, Permission & Data Classification |
 | 화면 구조, 상태 표현, 조작 흐름, 접근성 | UI/UX Specification |
 | 시험 사례, 합격 임계치, 증적, 출시 평가 | Test & Evaluation Plan |
-| 생성형 AI 개발 단계, 단계별 prompt, gate, handoff | AI Development Prompt Playbook |
+| 생성형 AI 개발 workflow phase, P1 PLAN-P5 COMPLETE prompt, gate, handoff | AI Development Prompt Playbook |
 | 구현 순서, 마일스톤 진입·종료 조건 | Implementation Roadmap |
 | 설치된 시스템의 진단·백업·복구·업데이트 | Operations & Recovery Runbook |
 | 선택한 아키텍처와 대안·결과·변경 사유 | Architecture Decision Records |
@@ -149,6 +152,6 @@
 - 프로필, API, 이벤트, 어댑터 계약이 구현 가능한 수준으로 타입과 오류를 정의한다.
 - 보안 문서가 자료 등급, 승인 경계, 비밀정보, 파일·Git·명령 정책을 포함한다.
 - PRD 기능 요구사항이 시험 계획의 사례와 추적된다.
-- 단계별 구현 목표마다 검증 방법과 종료 조건이 있다.
+- TS00-TS10 구현 목표마다 검증 방법과 종료 조건이 있다.
 - 설치, 장애, 복구, 백업, 업데이트 절차가 운영 런북에 있다.
 - 2D 가상 오피스가 핵심 기능과 분리된 후순위 단계로 유지된다.

@@ -2,7 +2,7 @@
 
 > 버전: 1.0  
 > 작성일: 2026-07-20  
-> 목적: 생성형 AI를 이용해 계획 → 검토 → 구현 → 검증·평가 → 완성 단계를 일관되게 수행하기 위한 실행 프롬프트
+> 목적: 생성형 AI를 이용해 P1 PLAN → P2 REVIEW → P3 IMPLEMENT → P4 VALIDATE → P5 COMPLETE를 일관되게 수행하기 위한 실행 프롬프트
 
 ## 1. 사용 방법
 
@@ -18,6 +18,7 @@ OUT_OF_SCOPE={이번 작업에서 제외할 범위}
 TARGET_BRANCH={통합 대상 로컬 브랜치}
 DATA_CLASSIFICATION={public|internal|confidential|controlled}
 USER_REQUIREMENTS={추가 사용자 요구사항}
+WORKFLOW_MODE={manual_independent|controller_isolated}
 ```
 
 권장 문서 위치는 `{REPO_PATH}/docs/orion/`이다. 현재 문서가 다른 위치에 있다면 `DOCS_DIR`에 실제 경로를 입력한다.
@@ -36,21 +37,30 @@ USER_REQUIREMENTS={추가 사용자 요구사항}
 
 `.orion/tasks/`를 Git에 포함할지 여부는 저장소 정책으로 결정한다. 포함하지 않는 경우에도 최종 보고서는 `docs/` 또는 이슈 시스템에 보존한다.
 
-## 2. 단계별 권장 에이전트
+## 2. P1-P5 workflow phase와 격리 요구사항
 
-| 단계 | 주 담당 | 보조·독립 검토 |
+| Workflow phase | 주 담당 | 독립 검토·검증 context |
 |---|---|---|
-| 1. 계획 | Orion | Nexus, Archon, 관련 전문 Agent |
-| 2. 검토 | Archon | Sentinel, Regula, 관련 도메인 Agent |
-| 3. 구현 | Forge·Luma·Iris·Keystone 중 해당 Agent | Archon |
-| 4. 검증·평가 | Verify | Sentinel, 관련 전문 Agent |
-| 5. 완성 | Archon | Orion, Nexus |
+| P1 PLAN | Orion | Nexus, Archon, 관련 전문 Agent |
+| P2 REVIEW | Archon | Sentinel, Regula, 관련 도메인 Agent |
+| P3 IMPLEMENT | Forge·Luma·Iris·Keystone 중 해당 Agent | Archon |
+| P4 VALIDATE | Verify | Sentinel, 관련 전문 Agent |
+| P5 COMPLETE | Archon | Orion, Nexus |
 
-검토와 검증은 가능하면 구현과 다른 AI 세션 또는 다른 모델이 수행한다. 같은 AI가 수행해야 한다면 새 컨텍스트에서 시작하고 구현자의 결론을 사실로 가정하지 않는다.
+각 작업은 정확히 하나의 `WORKFLOW_MODE`를 선택하고 기록해야 한다: `manual_independent` 또는 `controller_isolated`. 두 모드는 혼합할 수 없다.
 
-## 3. 모든 단계에 적용할 공통 규칙
+- `manual_independent`: 사용자가 각 workflow phase마다 별도의 일반 AI 세션을 시작한다.
+- `controller_isolated`: 현재 작업에 대해 사용자가 자동화를 명시적으로 위임한 경우에만 controller가 실제 격리 worker를 시작한다. planner/reviewer와 implementer/validator는 서로 다른 context여야 하며, 각 worker/session ID와 산출물 hash를 기록한다.
+- same-session role reset 또는 동일 context 안의 different-model role reset은 독립 검토나 검증이 아니다. 같은 session 안의 새 context도 충분하지 않다.
+- `P2 REVIEW` and `P4 VALIDATE` MUST STOP with `BLOCKED` when the selected mode cannot supply a real separate session or isolated worker for that independent gate.
+- M0에서 Orion, Archon, Forge, Verify, Sentinel, Nexus, Arca는 책임 레이블일 뿐 호출 가능한 AIOffice product Agent가 아니다. AIOffice product Agent가 실행되었다고 주장하지 마라.
+- 자동화 위임은 external-action approval을 부여하지 않는다. push, PR 생성·merge, deploy, release, external message 및 모든 외부 mutation은 별도 사용자 승인이 필요하다.
 
-아래 공통 프롬프트를 각 단계 프롬프트 앞에 붙인다.
+> Migration note: `단계 1 -> P1 PLAN`; `단계 2 -> P2 REVIEW`; `단계 3 -> P3 IMPLEMENT`; `단계 4 -> P4 VALIDATE`; `단계 5 -> P5 COMPLETE`.
+
+## 3. 모든 P workflow phase에 적용할 공통 규칙
+
+아래 공통 프롬프트를 각 P workflow phase 프롬프트 앞에 붙인다.
 
 ```text
 당신은 Orion Console 개발팀의 AI 작업자다.
@@ -65,9 +75,10 @@ USER_REQUIREMENTS={추가 사용자 요구사항}
 - Target branch: {TARGET_BRANCH}
 - Data classification: {DATA_CLASSIFICATION}
 - Additional requirements: {USER_REQUIREMENTS}
+- Workflow mode: {WORKFLOW_MODE}
 
 [절대 규칙]
-1. 현재 단계에서 허용된 작업만 수행하고 다음 단계를 완료했다고 주장하지 마라.
+1. 현재 P workflow phase에서 허용된 작업만 수행하고 다음 P workflow phase를 완료했다고 주장하지 마라.
 2. 작업 전 `git status`, 현재 branch, 저장소 지침 파일을 확인하라. AGENTS.md, CLAUDE.md, README, package scripts 등 더 가까운 범위의 지침을 준수하라.
 3. 사용자의 기존 변경사항을 덮어쓰거나 되돌리지 마라. 충돌하면 작업을 중지하고 정확한 파일과 충돌 내용을 보고하라.
 4. Orion 문서의 보안·자료 등급·승인 규칙을 우회하지 마라.
@@ -77,13 +88,22 @@ USER_REQUIREMENTS={추가 사용자 요구사항}
 8. 필요한 정보를 저장소와 문서에서 확인할 수 있으면 사용자에게 묻지 말고 조사하라. 결과를 크게 바꾸는 선택만 질문하라.
 9. 실패한 명령과 test를 숨기지 마라. 같은 실패를 무한 반복하지 말고 root cause와 다음 행동을 기록하라.
 10. 완료 조건을 모두 충족하지 못하면 `완료`라고 표현하지 마라.
+11. `WORKFLOW_MODE`는 정확히 하나만 선택하고 기록하라: `manual_independent` 또는 `controller_isolated`. 두 모드를 혼합하거나 다른 값으로 대체하지 마라.
+12. `manual_independent`에서는 사용자가 각 P workflow phase의 실제 별도 일반 AI session을 시작한다. `controller_isolated`에서는 명시적 사용자 자동화 위임 뒤 controller가 실제 격리 worker를 시작하며, planner/reviewer와 implementer/validator는 서로 다른 context여야 하고 worker/session ID와 artifact hash를 기록한다.
+13. same-session role reset 또는 동일 context 안의 different-model role reset은 독립 검토나 검증이 아니며, 같은 session 안의 새 context도 충분하지 않다.
+14. `P2 REVIEW` and `P4 VALIDATE` MUST STOP with `BLOCKED` when the selected mode cannot supply a real separate session or isolated worker for that independent gate.
+15. M0의 역할 레이블을 호출 가능한 AIOffice product Agent로 주장하지 마라.
+16. 자동화 위임은 external-action approval을 부여하지 않는다. push, PR 생성·merge, deploy, release, external message 및 모든 외부 mutation은 별도 사용자 승인이 필요하다.
 
 [공통 출력]
-단계 종료 시 다음 handoff block을 보고서 끝에 작성하라.
+P workflow phase 종료 시 다음 handoff block을 보고서 끝에 작성하라.
 
 HANDOFF
 - task_id:
-- phase:
+- phase: P1 PLAN | P2 REVIEW | P3 IMPLEMENT | P4 VALIDATE | P5 COMPLETE
+- workflow_mode:
+- worker_or_session_id:
+- artifact_hashes:
 - status: PASS | FAIL | BLOCKED | REVISION_REQUIRED
 - repository:
 - branch_or_worktree:
@@ -97,10 +117,10 @@ HANDOFF
 - assumptions:
 - unresolved_items:
 - approval_required:
-- recommended_next_phase:
+- recommended_next_phase: P1 PLAN | P2 REVIEW | P3 IMPLEMENT | P4 VALIDATE | P5 COMPLETE
 ```
 
-## 4. 단계 1 — 계획 프롬프트
+## 4. P1 PLAN — 계획 프롬프트
 
 ### 읽어야 할 자료
 
@@ -141,12 +161,12 @@ Arca 관련 변경은 M1-M5의 향후 계약으로만 계획하며 M0 runtime, h
 ```text
 [공통 프롬프트를 먼저 삽입]
 
-현재 단계는 1. 계획이다. 제품 코드나 설정을 구현하지 마라. 허용된 쓰기는 계획 산출물뿐이다.
+현재 workflow phase는 P1 PLAN이다. 제품 코드나 설정을 구현하지 마라. 허용된 쓰기는 계획 산출물뿐이다.
 
 다음 순서로 수행하라.
 
 1. `{DOCS_DIR}/orion-console-documentation-index.md`를 먼저 읽고 이 작업에 필요한 Source of Truth 문서를 결정하라.
-2. 위 계획 단계의 필수 문서와 작업 범위에 해당하는 조건부 문서를 읽어라. 읽은 문서와 관련 section을 목록으로 남겨라.
+2. 위 P1 PLAN의 필수 문서와 작업 범위에 해당하는 조건부 문서를 읽어라. 읽은 문서와 관련 section을 목록으로 남겨라.
 3. 저장소 구조, 현재 구현 상태, 사용 기술, build·lint·typecheck·test 명령, 기존 변경사항을 read-only로 조사하라.
 4. 요청사항을 PRD 기능 요구사항, 보안 규칙, ADR, 수용 기준과 연결한 Requirement Traceability 표를 작성하라.
 5. 현재 상태와 목표 상태의 gap을 분석하라. 이미 구현된 기능을 다시 만들지 마라.
@@ -184,21 +204,21 @@ Arca 관련 변경은 M1-M5의 향후 계약으로만 계획하며 M0 runtime, h
 ## 14. Definition of Done
 ## 15. Handoff
 
-계획 단계 PASS 조건:
+P1 PLAN PASS 조건:
 - 모든 scope 항목이 구현 step과 test에 연결됨
 - 관련 PRD·Security·ADR 위반이 없음
 - 파일·interface·검증 방법이 구체적임
 - rollback과 실패 흐름이 있음
 - 구현자가 추가 설계 없이 시작할 수 있음
 
-마지막 응답에는 계획 파일 경로, 핵심 단계, 미결정 사항, 검토 단계에 전달할 내용을 요약하라.
+마지막 응답에는 계획 파일 경로, 핵심 P1 PLAN 항목, 미결정 사항, P2 REVIEW에 전달할 내용을 요약하라.
 ```
 
-## 5. 단계 2 — 계획 검토 프롬프트
+## 5. P2 REVIEW — 계획 검토 프롬프트
 
 ### 읽어야 할 자료
 
-- 단계 1의 `plan.md`
+- P1 PLAN의 `plan.md`
 - Documentation Index
 - PRD의 관련 요구사항·수용 기준
 - 상세 기술 명세서의 관련 구조·상태 전이·데이터 모델
@@ -213,7 +233,7 @@ Arca 관련 변경은 M1-M5의 향후 계약으로만 계획하며 M0 runtime, h
 ```text
 [공통 프롬프트를 먼저 삽입]
 
-현재 단계는 2. 계획 검토다. 당신은 구현자와 독립된 기술 검토자다. 제품 코드를 수정하거나 계획의 의도를 선의로 보완해 승인하지 마라. 허용된 쓰기는 review.md뿐이다.
+현재 workflow phase는 P2 REVIEW다. 당신은 구현자와 독립된 기술 검토자다. 제품 코드를 수정하거나 계획의 의도를 선의로 보완해 승인하지 마라. 허용된 쓰기는 review.md뿐이다.
 
 입력 계획: `{REPO_PATH}/.orion/tasks/{TASK_ID}/plan.md`
 
@@ -263,10 +283,10 @@ Arca 관련 변경은 M1-M5의 향후 계약으로만 계획하며 M0 runtime, h
 - `REVISION_REQUIRED`: P0 또는 P1이 있거나 계획만으로 안전하게 구현할 수 없음
 - `BLOCKED`: 사용자 결정이나 외부 조건 없이는 검토를 끝낼 수 없음
 
-APPROVED가 아니면 구현 단계로 보내지 말고 계획 단계로 돌려보내라. 응답 첫 줄에 판정을 명시하라.
+APPROVED가 아니면 P3 IMPLEMENT로 보내지 말고 P1 PLAN으로 돌려보내라. 응답 첫 줄에 판정을 명시하라.
 ```
 
-## 6. 단계 3 — 구현 프롬프트
+## 6. P3 IMPLEMENT — 구현 프롬프트
 
 ### 읽어야 할 자료
 
@@ -284,9 +304,9 @@ APPROVED가 아니면 구현 단계로 보내지 말고 계획 단계로 돌려�
 ```text
 [공통 프롬프트를 먼저 삽입]
 
-현재 단계는 3. 구현이다.
+현재 workflow phase는 P3 IMPLEMENT다.
 
-먼저 `{REPO_PATH}/.orion/tasks/{TASK_ID}/review.md`의 판정이 APPROVED인지 확인하라. 승인되지 않았다면 어떤 작업도 구현하지 말고 계획 단계로 반환하라.
+먼저 `{REPO_PATH}/.orion/tasks/{TASK_ID}/review.md`의 P2 REVIEW 판정이 APPROVED인지 확인하라. 승인되지 않았다면 어떤 작업도 구현하지 말고 P1 PLAN으로 반환하라.
 
 구현 규칙:
 
@@ -318,7 +338,7 @@ APPROVED가 아니면 구현 단계로 보내지 말고 계획 단계로 돌려�
 ## 10. Diff Summary
 ## 11. Handoff
 
-구현 단계 PASS 조건:
+P3 IMPLEMENT PASS 조건:
 - 승인된 plan 항목이 모두 구현됨
 - 필요한 test와 문서가 함께 변경됨
 - 관련 lint·typecheck·unit·integration test 통과
@@ -326,10 +346,10 @@ APPROVED가 아니면 구현 단계로 보내지 말고 계획 단계로 돌려�
 - known limitation이 수용 기준을 침해하지 않음
 - 검증자가 재현할 명령과 환경 정보가 있음
 
-구현 완료는 제품 완성을 의미하지 않는다. 마지막 상태는 `READY_FOR_VALIDATION`으로 보고하라.
+P3 IMPLEMENT 완료는 제품 완성을 의미하지 않는다. 마지막 상태는 `READY_FOR_VALIDATION`으로 보고하고 P4 VALIDATE에 handoff하라.
 ```
 
-## 7. 단계 4 — 검증 및 평가 프롬프트
+## 7. P4 VALIDATE — 검증 및 평가 프롬프트
 
 ### 읽어야 할 자료
 
@@ -346,7 +366,7 @@ APPROVED가 아니면 구현 단계로 보내지 말고 계획 단계로 돌려�
 ```text
 [공통 프롬프트를 먼저 삽입]
 
-현재 단계는 4. 독립 검증 및 평가다. 구현자의 보고를 증거로 간주하지 말고 실제 코드, diff, 실행 결과로 다시 확인하라. 제품 코드를 수정하지 마라. 허용된 쓰기는 test evidence와 validation-report.md뿐이다.
+현재 workflow phase는 P4 VALIDATE 독립 검증 및 평가다. 구현자의 보고를 증거로 간주하지 말고 실제 코드, diff, 실행 결과로 다시 확인하라. 제품 코드를 수정하지 마라. 허용된 쓰기는 test evidence와 validation-report.md뿐이다.
 
 다음 순서로 수행하라.
 
@@ -368,7 +388,7 @@ APPROVED가 아니면 구현 단계로 보내지 말고 계획 단계로 돌려�
 7. CLI adapter 변경이면 fixture contract test를 먼저 수행하고, 실제 Codex·Claude CLI에서 무해한 read-only smoke test를 각각 수행하라. 사용할 수 없는 provider는 SKIPPED가 아니라 환경 blocker로 별도 표시하라.
 8. Agent 역할 변경이면 role gold set으로 최소 기준을 평가하고 실제 모델·fallback·profile version을 기록하라.
 9. log, artifact, DB, Git diff에서 credential·민감정보 누출을 검사하라.
-10. 실패를 구현 단계에서 수정하지 말고 최소 재현 절차와 expected/actual을 포함한 defect packet으로 작성하라.
+10. 실패를 P3 IMPLEMENT에서 수정하지 말고 최소 재현 절차와 expected/actual을 포함한 defect packet으로 작성하라.
 
 `{REPO_PATH}/.orion/tasks/{TASK_ID}/validation-report.md` 형식:
 
@@ -401,14 +421,14 @@ APPROVED가 아니면 구현 단계로 보내지 말고 계획 단계로 돌려�
 - FAIL: 85점 미만, P0·P1 존재, 필수 test 실패 또는 실행 불가
 - BLOCKED: 필요한 환경·CLI·fixture가 없어 핵심 수용 기준을 검증할 수 없음
 
-Security hard fail, 자료 유출, 데이터 손상, 승인 우회는 점수와 무관하게 FAIL이다. FAIL이면 defect별 담당 Agent와 재검증 범위를 지정하여 구현 단계로 돌려보내라. PASS일 때만 완성 단계로 전달하라.
+Security hard fail, 자료 유출, 데이터 손상, 승인 우회는 점수와 무관하게 FAIL이다. FAIL이면 defect별 담당 Agent와 재검증 범위를 지정하여 P3 IMPLEMENT로 돌려보내라. PASS일 때만 P5 COMPLETE로 전달하라.
 ```
 
-## 8. 단계 5 — 완성 프롬프트
+## 8. P5 COMPLETE — 완성 프롬프트
 
 ### 읽어야 할 자료
 
-- 다섯 단계의 모든 작업 산출물
+- P1 PLAN부터 P5 COMPLETE까지의 모든 작업 산출물
 - 최종 Git diff·history·working tree
 - PRD 수용 기준과 Definition of Done
 - Roadmap의 현재 milestone gate
@@ -420,7 +440,7 @@ Security hard fail, 자료 유출, 데이터 손상, 승인 우회는 점수와 
 ```text
 [공통 프롬프트를 먼저 삽입]
 
-현재 단계는 5. 완성 및 인계다. validation-report.md가 PASS가 아니면 완성 처리하지 마라.
+현재 workflow phase는 P5 COMPLETE 완성 및 인계다. validation-report.md가 PASS가 아니면 완성 처리하지 마라.
 
 다음 release readiness 점검을 수행하라.
 
@@ -476,7 +496,7 @@ Security hard fail, 자료 유출, 데이터 손상, 승인 우회는 점수와 
 ```text
 [공통 프롬프트를 먼저 삽입]
 
-현재 작업은 계획 수정 단계다. 원본 plan.md와 review.md를 읽고 모든 P0·P1 finding과 필수 P2를 해결하라. 제품 코드를 구현하지 마라.
+현재 작업은 P1 PLAN 수정이다. 원본 plan.md와 review.md를 읽고 모든 P0·P1 finding과 필수 P2를 해결하라. 제품 코드를 구현하지 마라.
 
 각 finding에 대해 다음을 표로 작성하라.
 - Finding ID
@@ -485,7 +505,7 @@ Security hard fail, 자료 유출, 데이터 손상, 승인 우회는 점수와 
 - 계획에서 변경한 section
 - 변경 후 검증 방법
 
-반박은 문서 또는 실제 코드 근거가 있을 때만 허용한다. 수정된 plan.md의 version과 변경 이력을 갱신하고 다시 독립 검토 단계로 보내라. finding을 단순히 `해결됨`으로 표시하지 말고 구현 step·test·rollback에 실제로 반영하라.
+반박은 문서 또는 실제 코드 근거가 있을 때만 허용한다. 수정된 plan.md의 version과 변경 이력을 갱신하고 다시 독립 P2 REVIEW로 보내라. finding을 단순히 `해결됨`으로 표시하지 말고 구현 step·test·rollback에 실제로 반영하라.
 ```
 
 ## 10. 검증 실패 수정 프롬프트
@@ -502,36 +522,39 @@ Security hard fail, 자료 유출, 데이터 손상, 승인 우회는 점수와 
 3. 가장 작은 안전한 수정과 회귀 test를 구현하라.
 4. 동일 defect 계열의 인접 경로도 test하되 범위를 확장하지 마라.
 5. implementation-log.md에 defect ID, 수정 파일, test 결과를 추가하라.
-6. 전체 필수 test를 실행하고 독립 검증 단계로 되돌려라.
+6. 전체 필수 test를 실행하고 독립 P4 VALIDATE로 되돌려라.
 
 검증 보고서 자체의 PASS/FAIL을 구현자가 변경하지 마라. 재검증자가 새 결과를 기록해야 한다.
 ```
 
 ## 11. 한 번에 전체 흐름을 지휘하는 Master Prompt
 
-이 프롬프트는 한 AI에게 전체 작업을 지휘시키되 각 gate에서 멈추게 할 때 사용한다. 독립 검토 품질을 위해 실제 단계 2와 4는 별도 세션에 넘기는 방식을 권장한다.
+이 프롬프트는 한 AI에게 전체 작업을 지휘시키되 각 gate에서 멈추게 할 때 사용한다. §2와 §3의 mandatory workflow-mode 및 real-isolation 규칙을 적용한다.
 
 ```text
 [공통 프롬프트를 먼저 삽입]
 
-당신은 이 작업의 Orion Orchestrator다. 계획 → 독립 검토 → 구현 → 독립 검증·평가 → 완성의 state machine을 관리한다.
+당신은 이 작업의 Orion Orchestrator다. P1 PLAN → P2 REVIEW → P3 IMPLEMENT → P4 VALIDATE → P5 COMPLETE state machine을 관리한다.
 
 규칙:
-- 단계를 건너뛰지 마라.
-- 각 단계의 전용 프롬프트와 PASS 조건을 적용하라.
+- P1-P5 workflow phase를 건너뛰지 마라.
+- 시작 전에 정확히 하나의 `WORKFLOW_MODE`를 선택하고 기록하라: `manual_independent` 또는 `controller_isolated`. 두 모드를 혼합하거나 다른 값으로 대체하지 마라.
+- `manual_independent`에서는 사용자가 각 phase의 실제 별도 일반 AI session을 시작한다. `controller_isolated`에서는 명시적 사용자 자동화 위임 뒤 controller가 실제 격리 worker를 시작하며 planner/reviewer와 implementer/validator는 서로 다른 context여야 하고 worker/session ID와 artifact hash를 기록한다.
+- same-session role reset 또는 동일 context 안의 different-model role reset은 독립 검토나 검증이 아니며, 같은 session 안의 새 context도 충분하지 않다.
+- `P2 REVIEW` and `P4 VALIDATE` MUST STOP with `BLOCKED` when the selected mode cannot supply a real separate session or isolated worker for that independent gate.
+- 각 P workflow phase의 전용 프롬프트와 PASS 조건을 적용하라.
 - 산출물을 `.orion/tasks/{TASK_ID}/`에 저장하라.
-- 계획 검토가 APPROVED가 아니면 구현하지 마라.
-- 검증이 PASS가 아니면 완성하지 마라.
-- 단계 2와 4는 가능하면 별도 Agent·세션에 handoff할 prompt packet을 만들어라.
+- P2 REVIEW가 APPROVED가 아니면 P3 IMPLEMENT를 시작하지 마라.
+- P4 VALIDATE가 PASS가 아니면 P5 COMPLETE를 시작하지 마라.
 - 사용자의 응답이 없어도 안전한 로컬 read·edit·test 범위에서는 진행할 수 있지만, 외부 상태 변경과 보안 경계 변경은 승인 없이 진행하지 마라.
-- 각 gate에서 현재 상태, 산출물, 차단 사항, 다음 단계 prompt를 보고하고 멈춰라.
+- 각 gate에서 현재 P phase, `WORKFLOW_MODE`, 산출물, 차단 사항, 다음 P phase prompt를 보고하고 멈춰라.
 
-먼저 단계 1 계획만 수행하라. 계획을 작성한 뒤 구현을 시작하지 말고 검토용 handoff packet을 출력하라.
+먼저 P1 PLAN만 수행하라. 계획을 작성한 뒤 P3 IMPLEMENT를 시작하지 말고 P2 REVIEW handoff packet을 출력하라.
 ```
 
 ## 12. Handoff Packet Template
 
-다른 AI 세션에 넘길 때 아래를 함께 제공한다.
+P2 REVIEW 또는 P4 VALIDATE handoff에는 아래 정보를 함께 제공하고, 선택한 `WORKFLOW_MODE`의 real-isolation 증거를 포함한다.
 
 ```text
 ORION HANDOFF PACKET
@@ -541,8 +564,11 @@ Task: {TASK_TITLE}
 Repository: {REPO_PATH}
 Docs: {DOCS_DIR}
 Data classification: {DATA_CLASSIFICATION}
-Current phase:
-Required next phase:
+WORKFLOW_MODE: manual_independent | controller_isolated
+Current phase: P1 PLAN | P2 REVIEW | P3 IMPLEMENT | P4 VALIDATE | P5 COMPLETE
+Required next phase: P1 PLAN | P2 REVIEW | P3 IMPLEMENT | P4 VALIDATE | P5 COMPLETE
+Worker/session ID:
+Artifact hash:
 Base commit:
 Head commit:
 Worktree/branch:
@@ -591,5 +617,5 @@ Expected output:
 - [ ] 첫 작업의 자료 등급을 지정했다.
 - [ ] Git base branch와 worktree naming rule을 정했다.
 - [ ] format, lint, typecheck, unit, integration 명령을 최소 한 번 수동 확인했다.
-- [ ] 검토와 검증을 구현과 다른 세션에 맡길 수 있는 handoff 방식을 정했다.
+- [ ] 선택한 `WORKFLOW_MODE`가 P2 REVIEW와 P4 VALIDATE에 필요한 실제 별도 session 또는 isolated worker를 제공하며 worker/session ID와 artifact hash를 기록하는지 확인했다.
 - [ ] M0 또는 M1 milestone에서 가장 작은 end-to-end vertical slice를 첫 작업으로 선택했다.

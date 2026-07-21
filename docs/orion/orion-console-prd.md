@@ -308,17 +308,19 @@ Codex CLI와 Claude Code CLI는 비대화형 실행, JSON 스트리밍, 세션 �
 
 ## 12. 출시 단계와 게이트
 
-| 단계 | 목표 | 출시 게이트 |
+| Release gate | 목표 | Roadmap milestone crosswalk |
 |---|---|---|
-| M0 기반 | 프로젝트·DB·API·한국어 UI 골격 | 앱이 한 명령으로 실행되고 health check 통과 |
-| M1 Contracts & Local Security | 미래 계약(SourceCard/SourceRequest 포함), SQLite·로컬 보안, fake adapter·fixture | fixture 계약 테스트 통과, 로컬 보안 기준 충족 |
-| M2 Provider Adapters | 실제 Codex·Claude 스트리밍 어댑터 | 시작·로그·취소·완료 상태가 일관됨 |
-| M3 Profiles & Orchestration | 18개 프로필, Orion 계획, DAG 스케줄러 | 규칙 검증과 8개 병렬 실행 테스트 통과 |
-| M4 Git & Quality Gates | worktree, 커밋, 테스트, QA, 통합 | 사용자 작업 폴더 무변경 및 충돌 보존 검증 |
-| M5 Dashboard & Approval | 승인 센터, 자료 등급, 보존 정책, 대시보드 | 외부 변경 차단 및 보안 테스트 통과 |
-| M6 Recovery & Hardening | 복구, 모델 대체, 성능, 문서 | 모든 인수 시나리오 3회 연속 성공 |
-| M7 Acceptance & Release | 최종 인수·출시 점검 | 출시 게이트 통과, Critical/High 0 |
-| M8 Virtual Office (Later) | 2D 가상 오피스 | 핵심 시스템 SLA 달성 후 별도 승인 |
+| R0 Foundation | 프로젝트·DB·API·한국어 UI 골격 | M0 |
+| R1 Local Core | 미래 계약(SourceCard/SourceRequest 포함), SQLite·로컬 보안, fake adapter·fixture | M1 |
+| R2 Provider Execution | 실제 Codex·Claude 스트리밍 어댑터 | M2 |
+| R3 Profiles & Orchestration | 18개 프로필, Orion 계획, DAG 스케줄러 | M3 |
+| R4 Git, Quality & Control Plane | worktree, 커밋, 테스트, QA, 통합, 승인 센터, 자료 등급, 보존 정책, 대시보드 | M4-M5 |
+| R5 Hardening & Release | 복구, 모델 대체, 성능, 문서, 최종 인수·출시 점검 | M6-M7 |
+| R6 Virtual Office | 2D 가상 오피스 | M8 |
+
+Release gates never reuse the M namespace.
+
+This correction supersedes IMPL-001's prior M0-M8 PRD-gate-table edit.
 
 ## 13. 주요 리스크와 대응
 

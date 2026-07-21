@@ -1,5 +1,6 @@
 .orion/
 docs/orion/
+docs/tasks/
 pnpm-lock.yaml
 node_modules/
 coverage/

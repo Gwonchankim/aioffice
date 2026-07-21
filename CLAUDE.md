@@ -8,11 +8,11 @@ Read and follow `AGENTS.md` before using tools or changing files. Rule precedenc
 
 This file adds Claude Code-specific guidance only; it does not redefine the common repository rules.
 
-## Manual Sessions and Roles
+## Workflow Execution Modes
 
-Follow `AGENTS.md` §2, **Manual AI Sessions and Gates**. Agent names are role labels during M0, not callable runtime Agents. Do not claim that a nonexistent Agent, scheduler, router, profile runner, or automatic handoff was used.
+`AGENTS.md` §2 is authoritative for workflow execution. For every task, record exactly one `WORKFLOW_MODE`: `manual_independent` or `controller_isolated`; do not redefine, mix, or weaken either mode.
 
-Implementation and independent validation must remain separate user-started sessions.
+Its real-isolation, distinct-context, worker/session-ID, and artifact-hash requirements are mandatory. A same-session or same-context different-model role reset is not independent review or validation, and `P2 REVIEW` and `P4 VALIDATE` MUST STOP with `BLOCKED` without the required real separate session or isolated worker. No report may claim an AIOffice product Agent executed. Automation delegation does not grant external-action approval; the separately approved external-action boundaries in `AGENTS.md` remain binding.
 
 ## Tool and Subagent Use
 

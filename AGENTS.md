@@ -7,26 +7,26 @@
 - Product scope follows the PRD; API shapes follow the API Contract; implementation sequencing follows the Roadmap and AI Development Prompt Playbook.
 - A lower-priority instruction MUST NOT weaken a higher-priority security, classification, permission, approval, or data-handling rule.
 
-## 2. Manual AI Sessions and Gates
+## 2. Workflow Execution Modes and Gates
 
-- During M0, names such as Orion, Archon, Forge, Verify, and Sentinel are responsibility labels only. They are not callable Agents.
-- Automatic routing, scheduler execution, Agent Profile execution, Agent invocation, and automatic handoff do not exist yet.
-- Planning, review, implementation, validation, and completion are performed by independent, user-started general Codex or Claude sessions.
-- NEVER claim that a nonexistent Agent was invoked or that an automatic handoff occurred.
-- The user inspects file-based artifacts and manually starts every phase transition.
-- Implementation MUST NOT start unless the task `review.md` verdict is `APPROVED`.
-- Completion MUST NOT start unless the independent `validation-report.md` verdict is `PASS`.
-- Implementation and independent validation MUST use different AI sessions.
+Each task MUST select and record exactly one `WORKFLOW_MODE`: `manual_independent` or `controller_isolated`.
+
+- `manual_independent`: the user starts a separate general-AI session for each workflow phase.
+- `controller_isolated`: only after explicit user delegation for the current task, a controller starts real isolated workers; planner/reviewer and implementer/validator are distinct contexts; each worker/session ID and produced artifact hash is recorded.
+- A same-session role reset, or a different-model role reset that remains in the same context, is not independent review or validation. A new context inside the same session is not sufficient.
+- `P2 REVIEW` and `P4 VALIDATE` MUST STOP with `BLOCKED` when the selected mode cannot supply a real separate session or isolated worker for that independent gate.
+- During M0, Orion, Archon, Forge, Verify, Sentinel, Nexus, and Arca are responsibility labels only, not callable AIOffice product Agents. Never claim that an AIOffice product Agent executed or that an automatic handoff occurred.
+- Automation delegation does not grant external-action approval. Push, PR creation or merge, deployment, release, external messages, and every other external mutation remain separately user-approved.
 
 ## 3. Development Gates
 
 The required flow is:
 
-1. Planning: approved, versioned `plan.md`.
-2. Independent plan review: `review.md` with `APPROVED` verdict.
-3. Implementation: approved scope only, with an `implementation-log.md` and local commits.
-4. Independent validation: reproduce results and issue `validation-report.md`.
-5. Completion: only after validation PASS, with final evidence and `completion-report.md`.
+1. P1 PLAN: approved, versioned `plan.md`.
+2. P2 REVIEW: independent plan review with an `APPROVED` `review.md` verdict.
+3. P3 IMPLEMENT: approved scope only, with an `implementation-log.md` and local commits.
+4. P4 VALIDATE: independent reproduction and `validation-report.md`.
+5. P5 COMPLETE: only after validation PASS, with final evidence and `completion-report.md`.
 
 A phase may claim success only when its own measurable gate is satisfied. M0 may be called complete only when the final M0 gate and preserved validation/completion evidence both pass. Uncertain, partial, or unverified work MUST NOT be reported as complete.
 
