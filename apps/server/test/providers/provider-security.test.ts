@@ -22,6 +22,7 @@ import {
   buildProviderEnvironment,
   canonicalizeProviderCwd,
   isPermittedProjectEnvironmentName,
+  NativeProviderProcessPort,
   RuntimeOutputSchemaStore,
   type ProviderProcessHandle,
 } from '../../src/providers/provider-process.js';
@@ -233,5 +234,27 @@ describe('provider process security', () => {
     const verify = registry.verifyClosed(leakingOwned);
     leaking.finish({ exitCode: 0, signal: null });
     await expect(verify).rejects.toMatchObject({ code: 'PROVIDER_EXECUTION_FAILED' });
+  });
+  it('returns injected owned-tree counts before and after terminating a benign owned process', async () => {
+    let descendantCount = 1;
+    const port = new NativeProviderProcessPort(async () => descendantCount);
+    const child = port.spawn({
+      executable: process.execPath,
+      argv: ['--eval', 'setTimeout(() => undefined, 20_000);'],
+      cwd: tmpdir(),
+      env: process.env,
+      shell: false,
+    });
+    try {
+      expect(await child.countOwnedDescendants()).toBeGreaterThan(0);
+
+      child.requestGracefulTermination();
+      await child.exited;
+      descendantCount = 0;
+      expect(await child.countOwnedDescendants()).toBe(0);
+    } finally {
+      child.requestGracefulTermination();
+      await child.exited;
+    }
   });
 });

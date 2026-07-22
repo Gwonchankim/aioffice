@@ -9,12 +9,24 @@ import {
   unknownMapping,
   type AdapterMapperContext,
   type BuiltProviderCommand,
+  type ProviderAdapterOptions,
 } from './adapter.js';
 import type { ProviderFrameMapper } from './incremental-line-parser.js';
 import { redactProviderText } from './provider-redaction.js';
 
 export class CodexAdapter extends BaseProviderAdapter {
   protected readonly provider = 'openai' as const;
+  protected readonly requiredCapabilities = [
+    'jsonl',
+    'output_schema',
+    'resume',
+    'sandbox',
+  ] as const;
+
+  protected readonly authenticationProbeArgs = ['login', 'status'] as const;
+  public constructor(options: ProviderAdapterOptions) {
+    super(options);
+  }
 
   protected buildCommand(
     request: AgentRunRequest | ResumeRunRequest,

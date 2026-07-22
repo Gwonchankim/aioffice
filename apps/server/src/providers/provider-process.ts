@@ -98,6 +98,12 @@ export class RuntimeOutputSchemaStore implements OutputSchemaStore {
 }
 
 export class NativeProviderProcessPort implements ProviderProcessPort {
+  public constructor(
+    private readonly countDescendants: (
+      rootPid: number,
+    ) => Promise<number> | number = countWindowsOwnedDescendants,
+  ) {}
+
   public spawn(request: ProviderProcessSpawnRequest): ProviderProcessHandle {
     if (request.shell !== false) {
       throw new ApplicationError(
@@ -153,7 +159,7 @@ export class NativeProviderProcessPort implements ProviderProcessPort {
         child.kill('SIGTERM');
       },
       terminateOwnedTree: () => terminateWindowsTree(pid),
-      countOwnedDescendants: () => 0,
+      countOwnedDescendants: () => this.countDescendants(pid),
     };
   }
 }
@@ -247,6 +253,136 @@ const OS_ENVIRONMENT_NAMES = [
   'LC_ALL',
 ] as const;
 
+const WINDOWS_DESCENDANT_COUNT_QUERY =
+  "$pending = [System.Collections.Generic.Queue[uint32]]::new(); $pending.Enqueue([uint32]$env:ORION_OWNED_ROOT_PID); $count = 0; while ($pending.Count -gt 0) { $parent = $pending.Dequeue(); Get-CimInstance -Query ('SELECT ProcessId FROM Win32_Process WHERE ParentProcessId = {0}' -f $parent) -ErrorAction Stop | ForEach-Object { $pending.Enqueue([uint32]$_.ProcessId); $count += 1 } }; [Console]::Out.Write($count)";
+
+export function trustedWindowsPowerShellExecutable(
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  const systemRoot = environment.SystemRoot;
+  if (
+    systemRoot === undefined ||
+    systemRoot.length === 0 ||
+    (!isAbsolute(systemRoot) && !win32.isAbsolute(systemRoot))
+  ) {
+    throw new ApplicationError(
+      'PROVIDER_EXECUTION_FAILED',
+      'The operating system process query is unavailable.',
+    );
+  }
+  try {
+    const canonicalSystemRoot = realpathSync.native(systemRoot);
+    const executable = realpathSync.native(
+      join(canonicalSystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    );
+    if (!isContained(executable, canonicalSystemRoot)) throw new Error('unsafe executable');
+    return executable;
+  } catch {
+    throw new ApplicationError(
+      'PROVIDER_EXECUTION_FAILED',
+      'The operating system process query is unavailable.',
+    );
+  }
+}
+
+async function countWindowsOwnedDescendants(rootPid: number): Promise<number> {
+  if (!Number.isSafeInteger(rootPid) || rootPid <= 0) {
+    throw new ApplicationError(
+      'PROVIDER_EXECUTION_FAILED',
+      'The provider process tree could not be verified.',
+    );
+  }
+
+  let query: ReturnType<typeof spawn>;
+  try {
+    query = spawn(
+      trustedWindowsPowerShellExecutable(),
+      [
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        WINDOWS_DESCENDANT_COUNT_QUERY,
+      ],
+      {
+        env: { ...process.env, ORION_OWNED_ROOT_PID: String(rootPid) },
+        shell: false,
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+  } catch {
+    throw new ApplicationError(
+      'PROVIDER_EXECUTION_FAILED',
+      'The provider process tree could not be verified.',
+    );
+  }
+  const stdout = query.stdout;
+  const stderr = query.stderr;
+  if (stdout === null || stderr === null) {
+    throw new ApplicationError(
+      'PROVIDER_EXECUTION_FAILED',
+      'The provider process tree could not be verified.',
+    );
+  }
+
+  const output = await new Promise<string>((resolveOutput, rejectOutput) => {
+    let retained = '';
+    let retainedBytes = 0;
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      query.kill('SIGTERM');
+    }, 10_000);
+    stdout.on('data', (chunk: Uint8Array) => {
+      const remaining = 1024 - retainedBytes;
+      if (remaining <= 0) return;
+      const bounded = Buffer.from(chunk).subarray(0, remaining);
+      retained += bounded.toString('utf8');
+      retainedBytes += bounded.byteLength;
+    });
+    stderr.resume();
+    query.once('error', () => {
+      clearTimeout(timeout);
+      rejectOutput(
+        new ApplicationError(
+          'PROVIDER_EXECUTION_FAILED',
+          'The provider process tree could not be verified.',
+        ),
+      );
+    });
+    query.once('close', (exitCode) => {
+      clearTimeout(timeout);
+      if (timedOut || exitCode !== 0) {
+        rejectOutput(
+          new ApplicationError(
+            'PROVIDER_EXECUTION_FAILED',
+            'The provider process tree could not be verified.',
+          ),
+        );
+        return;
+      }
+      resolveOutput(retained);
+    });
+  });
+
+  if (!/^\d+$/.test(output.trim())) {
+    throw new ApplicationError(
+      'PROVIDER_EXECUTION_FAILED',
+      'The provider process tree could not be verified.',
+    );
+  }
+  const descendantCount = Number(output);
+  if (!Number.isSafeInteger(descendantCount) || descendantCount < 0) {
+    throw new ApplicationError(
+      'PROVIDER_EXECUTION_FAILED',
+      'The provider process tree could not be verified.',
+    );
+  }
+  return descendantCount;
+}
 function terminateWindowsTree(pid: number): void {
   const systemRoot = process.env.SystemRoot;
   if (systemRoot === undefined || !Number.isSafeInteger(pid) || pid <= 0) return;

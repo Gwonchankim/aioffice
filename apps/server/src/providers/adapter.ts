@@ -10,6 +10,7 @@ import {
   type AgentRunRequest,
   type AgentRuntimeAdapter,
   type NormalizedAdapterEvent,
+  type ProviderCapabilityName,
   type ProviderDiagnostics,
   type ProviderHealth,
   type ProviderProcessErrorCode,
@@ -59,12 +60,22 @@ export interface ProviderAdapterOptions {
 export interface BuiltProviderCommand {
   readonly argv: readonly string[];
 }
+interface ProviderInspectionState {
+  readonly health: ProviderHealth;
+  readonly capabilities: ReadonlySet<ProviderCapabilityName>;
+}
+
+interface ProbeResult {
+  readonly exit: ProviderProcessExit;
+  readonly stdout: string;
+}
 
 export abstract class BaseProviderAdapter implements AgentRuntimeAdapter {
   private readonly ownership: ChildProcessOwnershipRegistry;
   private readonly environment: NodeJS.ProcessEnv;
   private readonly now: () => number;
   private readonly runningHandles = new Map<string, string>();
+  private inspection: ProviderInspectionState | undefined;
 
   protected constructor(protected readonly options: ProviderAdapterOptions) {
     this.ownership = options.ownership ?? new ChildProcessOwnershipRegistry();
@@ -73,6 +84,9 @@ export abstract class BaseProviderAdapter implements AgentRuntimeAdapter {
   }
 
   protected abstract readonly provider: 'openai' | 'anthropic';
+  protected abstract readonly requiredCapabilities: readonly ProviderCapabilityName[];
+
+  protected abstract readonly authenticationProbeArgs: readonly string[];
 
   protected abstract buildCommand(
     request: AgentRunRequest | ResumeRunRequest,
@@ -83,16 +97,115 @@ export abstract class BaseProviderAdapter implements AgentRuntimeAdapter {
   protected abstract createMapper(context: AdapterMapperContext): ProviderFrameMapper;
 
   public async inspect(): Promise<ProviderHealth> {
-    return {
-      provider: this.provider,
-      installed: true,
-      cliVersion: 'configured',
-      authenticated: false,
-      status: 'untested',
-      supportedModels: [],
-      lastCheckedAt: new Date(this.now()).toISOString(),
-      sanitizedError: null,
-    };
+    const checkedAt = new Date(this.now()).toISOString();
+    try {
+      const executable = this.options.resolveExecutable(this.options.executable);
+      const cwd = canonicalizeProviderCwd(
+        this.options.projectRoot,
+        this.options.projectRoot,
+        'read_only',
+      );
+      const version = await this.probe(executable, ['--version'], cwd);
+      if (version.exit.exitCode !== 0) {
+        return this.recordInspection(
+          {
+            provider: this.provider,
+            installed: false,
+            cliVersion: null,
+            authenticated: false,
+            status: 'not_installed',
+            supportedModels: [],
+            lastCheckedAt: checkedAt,
+            sanitizedError: 'The provider command is unavailable.',
+          },
+          [],
+        );
+      }
+
+      const cliVersion = parseCliVersion(version.stdout);
+      if (cliVersion === undefined) {
+        return this.recordInspection(
+          {
+            provider: this.provider,
+            installed: true,
+            cliVersion: null,
+            authenticated: false,
+            status: 'error',
+            supportedModels: [],
+            lastCheckedAt: checkedAt,
+            sanitizedError: 'The provider version probe returned an invalid response.',
+          },
+          [],
+        );
+      }
+
+      const authentication = await this.probe(executable, this.authenticationProbeArgs, cwd);
+      if (!isAuthenticated(authentication)) {
+        return this.recordInspection(
+          {
+            provider: this.provider,
+            installed: true,
+            cliVersion,
+            authenticated: false,
+            status: 'unauthenticated',
+            supportedModels: [],
+            lastCheckedAt: checkedAt,
+            sanitizedError: 'Provider authentication is required.',
+          },
+          [],
+        );
+      }
+
+      const metadata = `${version.stdout}\n${authentication.stdout}`;
+      const supportedModels = parseProbeModels(metadata);
+      const capabilities = parseProbeCapabilities(metadata);
+      const supportsRequiredCapabilities = this.requiredCapabilities.every((capability) =>
+        capabilities.has(capability),
+      );
+      if (!supportsRequiredCapabilities || supportedModels.length === 0) {
+        return this.recordInspection(
+          {
+            provider: this.provider,
+            installed: true,
+            cliVersion,
+            authenticated: true,
+            status: 'unsupported',
+            supportedModels,
+            lastCheckedAt: checkedAt,
+            sanitizedError: 'The provider does not support the required capabilities.',
+          },
+          capabilities,
+        );
+      }
+
+      return this.recordInspection(
+        {
+          provider: this.provider,
+          installed: true,
+          cliVersion,
+          authenticated: true,
+          status: 'ready',
+          supportedModels,
+          lastCheckedAt: checkedAt,
+          sanitizedError: null,
+        },
+        capabilities,
+      );
+    } catch {
+      return this.recordInspection(
+        {
+          provider: this.provider,
+          installed: false,
+          cliVersion: null,
+          authenticated: false,
+          status: 'not_installed',
+          supportedModels: [],
+          lastCheckedAt: checkedAt,
+          sanitizedError: 'The provider command is unavailable.',
+        },
+        [],
+      );
+    }
   }
 
   public start(request: AgentRunRequest): AsyncIterable<NormalizedAdapterEvent> {
@@ -110,6 +223,70 @@ export abstract class BaseProviderAdapter implements AgentRuntimeAdapter {
   public runtimeHandleForRun(runId: string): string | undefined {
     return this.runningHandles.get(runId);
   }
+  private recordInspection(
+    health: ProviderHealth,
+    capabilities: ReadonlySet<ProviderCapabilityName> | readonly ProviderCapabilityName[],
+  ): ProviderHealth {
+    this.inspection = { health, capabilities: new Set(capabilities) };
+    return health;
+  }
+
+  private async probe(
+    executable: string,
+    argv: readonly string[],
+    cwd: string,
+  ): Promise<ProbeResult> {
+    const child = await this.options.processPort.spawn({
+      executable,
+      argv,
+      cwd,
+      env: buildProviderEnvironment(this.environment, []),
+      shell: false,
+    });
+    const [stdout, exit] = await Promise.all([
+      collectProbeOutput(child.stdout),
+      child.exited,
+      drainProbeOutput(child.stderr),
+    ]);
+    return { exit, stdout };
+  }
+
+  private inspectionFailure(model: string):
+    | {
+        readonly code: ProviderProcessErrorCode;
+        readonly retryable: boolean;
+        readonly message: string;
+      }
+    | undefined {
+    const inspection = this.inspection;
+    if (inspection === undefined) return undefined;
+    if (!inspection.health.installed) {
+      return {
+        code: 'PROVIDER_UNAVAILABLE',
+        retryable: true,
+        message: 'The selected provider is unavailable.',
+      };
+    }
+    if (!inspection.health.authenticated) {
+      return {
+        code: 'PROVIDER_AUTH_REQUIRED',
+        retryable: false,
+        message: 'Provider authentication is required.',
+      };
+    }
+    if (
+      inspection.health.status !== 'ready' ||
+      !inspection.health.supportedModels.includes(model) ||
+      !this.requiredCapabilities.every((capability) => inspection.capabilities.has(capability))
+    ) {
+      return {
+        code: 'PROVIDER_UNSUPPORTED',
+        retryable: false,
+        message: 'The provider does not support the requested capability.',
+      };
+    }
+    return undefined;
+  }
 
   private async *execute(
     request: AgentRunRequest | ResumeRunRequest,
@@ -123,6 +300,20 @@ export abstract class BaseProviderAdapter implements AgentRuntimeAdapter {
       );
     }
     const model = validateProviderModel(request.model);
+    if (this.inspection === undefined) await this.inspect();
+    const inspectionFailure = this.inspectionFailure(model);
+    if (inspectionFailure !== undefined) {
+      yield adapterEvent(
+        'run.failed',
+        {
+          errorCode: inspectionFailure.code,
+          retryable: inspectionFailure.retryable,
+          sanitizedMessage: inspectionFailure.message,
+        },
+        EMPTY_PROVIDER_DIAGNOSTICS,
+      );
+      return;
+    }
     const cwd = canonicalizeProviderCwd(
       request.cwd,
       this.options.projectRoot,
@@ -367,6 +558,89 @@ export function assertSafeProviderArguments(argv: readonly string[]): void {
   }
 }
 
+const EMPTY_PROVIDER_DIAGNOSTICS: ProviderDiagnostics = {
+  invalidFrameCount: 0,
+  consecutiveInvalidFrameCount: 0,
+  unknownEventCount: 0,
+  stderrBytes: 0,
+  stderrOmittedBytes: 0,
+};
+
+const MAX_PROBE_OUTPUT_BYTES = 16 * 1024;
+const CAPABILITY_NAMES = new Set<ProviderCapabilityName>([
+  'jsonl',
+  'stream_json',
+  'output_schema',
+  'resume',
+  'sandbox',
+  'permission_mode',
+]);
+
+async function collectProbeOutput(stream: AsyncIterable<Uint8Array>): Promise<string> {
+  const chunks: Buffer[] = [];
+  let retained = 0;
+  for await (const chunk of stream) {
+    const remaining = MAX_PROBE_OUTPUT_BYTES - retained;
+    if (remaining <= 0) continue;
+    const bounded = Buffer.from(chunk).subarray(0, remaining);
+    chunks.push(bounded);
+    retained += bounded.byteLength;
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+async function drainProbeOutput(stream: AsyncIterable<Uint8Array>): Promise<void> {
+  for await (const chunk of stream) {
+    void chunk;
+    // Drain all probe diagnostics without retaining provider output.
+  }
+}
+
+function parseCliVersion(output: string): string | undefined {
+  const match = /\b[vV]?(\d+(?:\.\d+){1,3})\b/.exec(output);
+  return match?.[1];
+}
+
+function isAuthenticated(probe: ProbeResult): boolean {
+  return (
+    probe.exit.exitCode === 0 &&
+    probe.exit.signal === null &&
+    !/\b(?:not\s+(?:logged\s+in|authenticated)|unauthenticated|login\s+required|authentication\s+required)\b/i.test(
+      probe.stdout,
+    )
+  );
+}
+
+function parseProbeModels(output: string): string[] {
+  return parseProbeList(output, 'models').filter(
+    (model) =>
+      /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(model) &&
+      !/(?:token|secret|password|authorization|credential|cookie|^sk-)/i.test(model),
+  );
+}
+
+function parseProbeCapabilities(output: string): Set<ProviderCapabilityName> {
+  const capabilities = new Set<ProviderCapabilityName>();
+  for (const value of parseProbeList(output, 'capabilities')) {
+    if (CAPABILITY_NAMES.has(value as ProviderCapabilityName))
+      capabilities.add(value as ProviderCapabilityName);
+  }
+  return capabilities;
+}
+
+function parseProbeList(output: string, name: 'models' | 'capabilities'): string[] {
+  const values = new Set<string>();
+  const expression = new RegExp(`^\\s*${name}\\s*[:=]\\s*(.+)$`, 'i');
+  for (const line of output.split(/\r?\n/)) {
+    const match = expression.exec(line);
+    if (match?.[1] === undefined) continue;
+    for (const value of match[1].split(',')) {
+      const normalized = value.trim();
+      if (normalized.length > 0) values.add(normalized);
+    }
+  }
+  return [...values].slice(0, 128);
+}
 function mergeDiagnostics(
   base: ProviderDiagnostics,
   stderr: SanitizedStderrRing,

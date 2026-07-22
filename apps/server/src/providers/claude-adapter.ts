@@ -19,6 +19,14 @@ const DISALLOWED_TOOLS = 'Bash,Edit,Write,WebFetch,WebSearch';
 
 export class ClaudeAdapter extends BaseProviderAdapter {
   protected readonly provider = 'anthropic' as const;
+  protected readonly requiredCapabilities = [
+    'stream_json',
+    'output_schema',
+    'resume',
+    'permission_mode',
+  ] as const;
+
+  protected readonly authenticationProbeArgs = ['auth', 'status'] as const;
 
   public constructor(
     options: ProviderAdapterOptions,

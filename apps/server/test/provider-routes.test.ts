@@ -4,10 +4,12 @@ import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentRuntimeAdapter, ProviderHealth } from '@orion/contracts';
 
-import { createApplication } from '../src/app.js';
+import { createApplication, createProductionProviderAdapters } from '../src/app.js';
 import { createDatabase } from '../src/database.js';
 import { applyMigrations } from '../src/migrations.js';
 import { ProviderHealthService } from '../src/provider-health-service.js';
+import { ClaudeAdapter } from '../src/providers/claude-adapter.js';
+import { CodexAdapter } from '../src/providers/codex-adapter.js';
 
 const cleanup: string[] = [];
 const handles: Array<{ close(): void }> = [];
@@ -42,6 +44,15 @@ function health(provider: 'openai' | 'anthropic'): ProviderHealth {
 }
 
 describe('provider routes', () => {
+  it('PRV-005 composes configured production provider adapters without invoking a provider CLI', () => {
+    const adapters = createProductionProviderAdapters('C:\\Synthetic\\runtime', {
+      codexExecutable: 'C:\\Synthetic\\trusted\\codex.exe',
+      claudeExecutable: 'C:\\Synthetic\\trusted\\claude.exe',
+    });
+
+    expect(adapters.get('openai')).toBeInstanceOf(CodexAdapter);
+    expect(adapters.get('anthropic')).toBeInstanceOf(ClaudeAdapter);
+  });
   it('PRV-API-001 refreshes sanitized health with session, Origin, CSRF, and idempotency only', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'orion-provider-routes-'));
     cleanup.push(directory);

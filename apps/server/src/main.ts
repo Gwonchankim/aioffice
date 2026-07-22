@@ -58,6 +58,14 @@ export async function startServer(
       assetRoot: config.assetRoot,
       runtimeDirectory: config.runtimeDirectory,
       ...(config.gitExecutable === undefined ? {} : { gitExecutable: config.gitExecutable }),
+      trustedProviderExecutables: {
+        ...(config.codexExecutable === undefined
+          ? {}
+          : { codexExecutable: config.codexExecutable }),
+        ...(config.claudeExecutable === undefined
+          ? {}
+          : { claudeExecutable: config.claudeExecutable }),
+      },
       ...(database === undefined ? {} : { database: database.database, loopbackPort: config.port }),
       logger,
     });

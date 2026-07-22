@@ -3,6 +3,12 @@ import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 import { ulid } from 'ulid';
 import type { AgentRuntimeAdapter, Provider } from '@orion/contracts';
 
+import { ClaudeAdapter } from './providers/claude-adapter.js';
+import { CodexAdapter } from './providers/codex-adapter.js';
+import {
+  NativeProviderProcessPort,
+  RuntimeOutputSchemaStore,
+} from './providers/provider-process.js';
 import { getErrorCode, ApplicationError } from './errors.js';
 import { defaultTrustedGitExecutablePath } from './config.js';
 import { registerHealthRoute } from './health.js';
@@ -28,6 +34,33 @@ import { SystemResourceReader } from './resources.js';
 import { SessionManager } from './session.js';
 import { registerStaticSpa } from './static-spa.js';
 
+export interface TrustedProviderExecutables {
+  readonly codexExecutable?: string;
+  readonly claudeExecutable?: string;
+}
+
+export function createProductionProviderAdapters(
+  runtimeDirectory: string,
+  executables: TrustedProviderExecutables = {},
+): ReadonlyMap<Provider, AgentRuntimeAdapter> {
+  const adapters = new Map<Provider, AgentRuntimeAdapter>();
+  const processPort = new NativeProviderProcessPort();
+  const schemaStore = new RuntimeOutputSchemaStore(runtimeDirectory);
+  const adapterOptions = (executable: string) => ({
+    executable,
+    processPort,
+    schemaStore,
+    projectRoot: runtimeDirectory,
+    resolveExecutable: (trustedExecutable: string) => trustedExecutable,
+  });
+
+  if (executables.codexExecutable !== undefined)
+    adapters.set('openai', new CodexAdapter(adapterOptions(executables.codexExecutable)));
+  if (executables.claudeExecutable !== undefined)
+    adapters.set('anthropic', new ClaudeAdapter(adapterOptions(executables.claudeExecutable)));
+  return adapters;
+}
+
 export interface CreateApplicationOptions {
   readonly assetRoot: string;
   readonly runtimeDirectory: string;
@@ -40,6 +73,7 @@ export interface CreateApplicationOptions {
   readonly now?: () => Date;
   readonly requestId?: () => string;
   readonly providerAdapters?: ReadonlyMap<Provider, AgentRuntimeAdapter>;
+  readonly trustedProviderExecutables?: TrustedProviderExecutables;
   readonly providerHealth?: ProviderHealthService;
   readonly taskEventBroker?: TaskEventBroker;
 }
@@ -53,6 +87,9 @@ export async function createApplication(
       : Fastify({ loggerInstance: options.logger });
   const now = options.now ?? (() => new Date());
   const requestId = options.requestId ?? ulid;
+  const providerAdapters =
+    options.providerAdapters ??
+    createProductionProviderAdapters(options.runtimeDirectory, options.trustedProviderExecutables);
 
   app.setErrorHandler((error, request, reply) => {
     const code = getErrorCode(error) ?? 'INTERNAL_ERROR';
@@ -131,8 +168,7 @@ export async function createApplication(
     const projects = new ProjectRepository(options.database, now);
     const execution = new ExecutionRepository(options.database, now);
     const broker = options.taskEventBroker ?? new InMemoryTaskEventBroker();
-    const health =
-      options.providerHealth ?? new ProviderHealthService(options.providerAdapters, now);
+    const health = options.providerHealth ?? new ProviderHealthService(providerAdapters, now);
     registerProviderRoutes(app, {
       security,
       health,

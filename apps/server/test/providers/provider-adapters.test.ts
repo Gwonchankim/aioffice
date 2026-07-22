@@ -31,8 +31,47 @@ afterEach(() => {
   for (const path of cleanupPaths.splice(0)) rmSync(path, { recursive: true, force: true });
 });
 
+interface ProbeOutputs {
+  readonly version: string;
+  readonly authentication: string;
+}
+
+function probeOutputsFor(fixture: FakeProcessFixture): ProbeOutputs {
+  const inspection = fixture.expected.inspection;
+  const defaultCapabilities =
+    fixture.provider === 'codex'
+      ? 'jsonl,output_schema,resume,sandbox'
+      : 'stream_json,output_schema,resume,permission_mode';
+  const model = fixture.provider === 'codex' ? 'synthetic-codex-model' : 'synthetic-claude-model';
+  return {
+    version: [
+      `${fixture.provider} ${inspection?.cliVersion ?? '1.2.3-synthetic'}`,
+      `models: ${inspection?.supportedModels.join(',') ?? model}`,
+      `capabilities: ${inspection?.status === 'unsupported' ? '' : defaultCapabilities}`,
+    ].join('\n'),
+    authentication: inspection?.authenticated === false ? 'not authenticated' : 'authenticated',
+  };
+}
+
+function outputHandle(output: string): ProviderProcessHandle {
+  const stream = async function* () {
+    yield Buffer.from(output, 'utf8');
+  };
+  return {
+    pid: 41_000,
+    stdout: stream(),
+    stderr: (async function* () {})(),
+    exited: Promise.resolve({ exitCode: 0, signal: null }),
+    writeStdin: () => undefined,
+    requestGracefulTermination: () => undefined,
+    terminateOwnedTree: () => undefined,
+    countOwnedDescendants: () => 0,
+  };
+}
+
 class FixturePort implements ProviderProcessPort {
   public request: ProviderProcessSpawnRequest | undefined;
+  public readonly requests: ProviderProcessSpawnRequest[] = [];
   public stdinBytes = 0;
   public gracefulRequests = 0;
   public forceRequests = 0;
@@ -40,10 +79,22 @@ class FixturePort implements ProviderProcessPort {
   public constructor(
     private readonly fixture: FakeProcessFixture,
     private readonly gate?: Promise<void>,
+    private readonly probes: ProbeOutputs = probeOutputsFor(fixture),
   ) {}
+
+  public clearRequests(): void {
+    this.requests.splice(0);
+    this.request = undefined;
+  }
 
   public spawn(request: ProviderProcessSpawnRequest): ProviderProcessHandle {
     this.request = request;
+    this.requests.push(request);
+    if (request.argv.length === 1 && request.argv[0] === '--version')
+      return outputHandle(this.probes.version);
+    if ((request.argv[0] === 'login' || request.argv[0] === 'auth') && request.argv[1] === 'status')
+      return outputHandle(this.probes.authentication);
+
     let resolveExit: (exit: ProviderProcessExit) => void = () => undefined;
     const exited = new Promise<ProviderProcessExit>((resolve) => {
       resolveExit = resolve;
@@ -178,7 +229,8 @@ describe('fixture-driven Codex and Claude adapters', () => {
       const events = await collect(adapter.start(request(provider, root, timeoutAt)));
 
       expect(port.request?.shell).toBe(false);
-      expect(port.stdinBytes).toBeGreaterThan(0);
+      if (fixture.expected.inspection === undefined) expect(port.stdinBytes).toBeGreaterThan(0);
+      else expect(port.stdinBytes).toBe(0);
       for (const expected of fixture.expected.normalizedEvents) {
         if (expected.type !== 'run.cancelled') expect(eventTypes(events)).toContain(expected.type);
       }
@@ -281,24 +333,132 @@ describe('fixture-driven Codex and Claude adapters', () => {
     ]);
   });
 
-  it('reports only sanitized untested health until a separate inspection policy runs', async () => {
+  it.each([
+    ['codex', 'openai', ['login', 'status']] as const,
+    ['claude', 'anthropic', ['auth', 'status']] as const,
+  ])(
+    'derives $0 health and capabilities from fixed synthetic probes without exposing probe output',
+    async (fixtureProvider, provider, authenticationProbeArgs) => {
+      const root = mkdtempSync(join(tmpdir(), 'orion-provider-root-'));
+      cleanupPaths.push(root);
+      const fixture = allProviderProcessFixtures.find(
+        (candidate) =>
+          candidate.provider === fixtureProvider && candidate.scenario === 'normal-start',
+      );
+      if (fixture === undefined) throw new Error('Missing provider fixture.');
+      const port = new FixturePort(fixture, undefined, {
+        version: [
+          `${fixtureProvider} 1.2.3-synthetic`,
+          `models: synthetic-${fixtureProvider}-model`,
+          `capabilities: ${
+            fixtureProvider === 'codex'
+              ? 'jsonl,output_schema,resume,sandbox'
+              : 'stream_json,output_schema,resume,permission_mode'
+          }`,
+        ].join('\n'),
+        authentication:
+          'authenticated account=synthetic@example.test token=FAKE-SYNTHETIC-NOT-A-CREDENTIAL',
+      });
+      const adapter =
+        fixtureProvider === 'codex'
+          ? new CodexAdapter(options(port, root))
+          : new ClaudeAdapter(options(port, root));
+      const health = await adapter.inspect();
+
+      expect(Object.keys(health).sort()).toEqual([
+        'authenticated',
+        'cliVersion',
+        'installed',
+        'lastCheckedAt',
+        'provider',
+        'sanitizedError',
+        'status',
+        'supportedModels',
+      ]);
+      expect(health).toMatchObject({
+        provider,
+        installed: true,
+        cliVersion: '1.2.3',
+        authenticated: true,
+        status: 'ready',
+        supportedModels: [`synthetic-${fixtureProvider}-model`],
+        sanitizedError: null,
+      });
+      expect(port.requests.map((probe) => probe.argv)).toStrictEqual([
+        ['--version'],
+        authenticationProbeArgs,
+      ]);
+      expect(JSON.stringify(health)).not.toMatch(/synthetic@example|FAKE-SYNTHETIC/i);
+    },
+  );
+
+  it.each([['codex', 'openai'] as const, ['claude', 'anthropic'] as const])(
+    'derives $0 unsupported capability from a synthetic probe and performs zero execution spawns',
+    async (fixtureProvider, provider) => {
+      const root = mkdtempSync(join(tmpdir(), 'orion-provider-root-'));
+      cleanupPaths.push(root);
+      const fixture = allProviderProcessFixtures.find(
+        (candidate) =>
+          candidate.provider === fixtureProvider && candidate.scenario === 'normal-start',
+      );
+      if (fixture === undefined) throw new Error('Missing provider fixture.');
+      const port = new FixturePort(fixture, undefined, {
+        version: `models: synthetic-${fixtureProvider}-model\n${fixtureProvider} 1.2.3-synthetic\ncapabilities: jsonl`,
+        authentication: 'authenticated',
+      });
+      const adapter =
+        fixtureProvider === 'codex'
+          ? new CodexAdapter(options(port, root))
+          : new ClaudeAdapter(options(port, root));
+
+      expect((await adapter.inspect()).status).toBe('unsupported');
+      port.clearRequests();
+      const events = await collect(adapter.start(request(provider, root)));
+
+      expect(port.requests).toHaveLength(0);
+      expect(events).toMatchObject([
+        {
+          kind: 'event',
+          event: { type: 'run.failed', payload: { errorCode: 'PROVIDER_UNSUPPORTED' } },
+        },
+      ]);
+    },
+  );
+
+  it('derives unauthenticated status from synthetic auth output and does not leak identity data', async () => {
     const root = mkdtempSync(join(tmpdir(), 'orion-provider-root-'));
     cleanupPaths.push(root);
-    const fixture = allProviderProcessFixtures[0];
-    if (fixture === undefined) throw new Error('Missing provider fixture.');
-    const port = new FixturePort(fixture);
-    const health = await new CodexAdapter(options(port, root)).inspect();
-    expect(health).toStrictEqual({
+    const fixture = allProviderProcessFixtures.find(
+      (candidate) => candidate.provider === 'codex' && candidate.scenario === 'normal-start',
+    );
+    if (fixture === undefined) throw new Error('Missing Codex fixture.');
+    const port = new FixturePort(fixture, undefined, {
+      version:
+        'codex 1.2.3-synthetic\nmodels: synthetic-codex-model\ncapabilities: jsonl,output_schema,resume,sandbox',
+      authentication:
+        'not authenticated account=synthetic@example.test token=FAKE-SYNTHETIC-NOT-A-CREDENTIAL',
+    });
+    const adapter = new CodexAdapter(options(port, root));
+
+    const health = await adapter.inspect();
+    expect(health).toMatchObject({
       provider: 'openai',
       installed: true,
-      cliVersion: 'configured',
+      cliVersion: '1.2.3',
       authenticated: false,
-      status: 'untested',
+      status: 'unauthenticated',
       supportedModels: [],
-      lastCheckedAt: expect.any(String),
-      sanitizedError: null,
+      sanitizedError: 'Provider authentication is required.',
     });
-    expect(port.request).toBeUndefined();
+    expect(JSON.stringify(health)).not.toMatch(/synthetic@example|FAKE-SYNTHETIC/i);
+    port.clearRequests();
+    expect(await collect(adapter.start(request('openai', root)))).toMatchObject([
+      {
+        kind: 'event',
+        event: { type: 'run.failed', payload: { errorCode: 'PROVIDER_AUTH_REQUIRED' } },
+      },
+    ]);
+    expect(port.requests).toHaveLength(0);
   });
   it('records cancellation before a late final result and never reports late success', async () => {
     const root = mkdtempSync(join(tmpdir(), 'orion-provider-root-'));
@@ -317,7 +477,7 @@ describe('fixture-driven Codex and Claude adapters', () => {
     const adapter = new CodexAdapter({ ...options(port, root), ownership: registry });
     const iterator = adapter.start(request('openai', root))[Symbol.asyncIterator]();
     const pending = iterator.next();
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     const handle = adapter.runtimeHandleForRun(ids.run);
     expect(handle).toBeDefined();
     const cancellation = adapter.cancel(handle!);
