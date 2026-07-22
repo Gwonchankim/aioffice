@@ -7,6 +7,8 @@ import {
   CODEX_SMOKE_MODEL,
   PROVIDER_SMOKE_MAX_INVOCATIONS,
   PROVIDER_SMOKE_TIMEOUT_MS,
+  PROVIDER_SMOKE_CLEANUP_MAX_RETRIES,
+  PROVIDER_SMOKE_CLEANUP_RETRY_DELAY_MS,
   claudeSmokeArgv,
   codexResumeArgv,
   codexSmokeArgv,
@@ -16,6 +18,8 @@ import {
   requiresRealProviderTestOptIn,
   sameSnapshot,
   type SmokeProcessPort,
+  runProviderSmokeWithBestEffortCleanup,
+  type ProviderSmokeDirectoryRemover,
 } from '../provider-smoke.js';
 
 const paths = {
@@ -104,6 +108,41 @@ describe('deferred provider smoke contract', () => {
     };
     expect(sameSnapshot(snapshot, { ...snapshot })).toBe(true);
     expect(sameSnapshot(snapshot, { ...snapshot, filesHash: 'changed' })).toBe(false);
+  });
+  it('preserves computed evidence when synthetic repository cleanup encounters EBUSY', async () => {
+    const computedEvidence = [{ provider: 'openai', exitClassification: 'succeeded' }] as const;
+    const removedPaths: string[] = [];
+    const removalOptions: Parameters<ProviderSmokeDirectoryRemover>[1][] = [];
+    const failingRepositoryRemover: ProviderSmokeDirectoryRemover = async (path, options) => {
+      removedPaths.push(path.toString());
+      removalOptions.push(options);
+      if (path.toString() === paths.repository) {
+        throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+      }
+    };
+
+    const evidence = await runProviderSmokeWithBestEffortCleanup(
+      async () => computedEvidence,
+      () => [paths.repository, 'C:\\runtime'],
+      failingRepositoryRemover,
+    );
+
+    expect(evidence).toBe(computedEvidence);
+    expect(removedPaths).toEqual([paths.repository, 'C:\\runtime']);
+    expect(removalOptions).toEqual([
+      expect.objectContaining({
+        recursive: true,
+        force: true,
+        maxRetries: PROVIDER_SMOKE_CLEANUP_MAX_RETRIES,
+        retryDelay: PROVIDER_SMOKE_CLEANUP_RETRY_DELAY_MS,
+      }),
+      expect.objectContaining({
+        recursive: true,
+        force: true,
+        maxRetries: PROVIDER_SMOKE_CLEANUP_MAX_RETRIES,
+        retryDelay: PROVIDER_SMOKE_CLEANUP_RETRY_DELAY_MS,
+      }),
+    ]);
   });
 
   it('normalizes synthetic stream evidence through a fake port without an OS child process', async () => {

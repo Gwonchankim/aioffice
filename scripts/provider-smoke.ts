@@ -22,6 +22,8 @@ export const CODEX_SMOKE_MODEL = 'gpt-5.6-sol';
 export const CLAUDE_SMOKE_MODEL = 'sonnet';
 export const CLAUDE_READ_ONLY_TOOLS = 'Read,Glob,Grep';
 export const CLAUDE_DISALLOWED_TOOLS = 'Bash,Edit,Write,WebFetch,WebSearch';
+export const PROVIDER_SMOKE_CLEANUP_MAX_RETRIES = 3;
+export const PROVIDER_SMOKE_CLEANUP_RETRY_DELAY_MS = 100;
 
 export const providerSmokeResultSchema = {
   type: 'object',
@@ -48,6 +50,7 @@ export interface ProviderSmokeModels {
   readonly codex: string;
   readonly claude: string;
 }
+export type ProviderSmokeDirectoryRemover = typeof rm;
 
 export function codexSmokeArgv(paths: ProviderSmokePaths, model: string): readonly string[] {
   return [
@@ -421,7 +424,40 @@ function isNonNegativeNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
-async function runDeferredProviderSmoke(): Promise<readonly ProviderSmokeEvidence[]> {
+export async function runProviderSmokeWithBestEffortCleanup<T>(
+  operation: () => Promise<T>,
+  cleanupPaths: () => readonly (string | undefined)[],
+  removeDirectory: ProviderSmokeDirectoryRemover = rm,
+): Promise<T> {
+  let result!: T;
+  try {
+    result = await operation();
+  } finally {
+    const directories = cleanupPaths().filter((path): path is string => path !== undefined);
+    await Promise.all(
+      directories.map((directory) => removeProviderSmokeDirectory(directory, removeDirectory)),
+    );
+  }
+  return result;
+}
+
+async function removeProviderSmokeDirectory(
+  directory: string,
+  removeDirectory: ProviderSmokeDirectoryRemover,
+): Promise<void> {
+  try {
+    await removeDirectory(directory, {
+      recursive: true,
+      force: true,
+      maxRetries: PROVIDER_SMOKE_CLEANUP_MAX_RETRIES,
+      retryDelay: PROVIDER_SMOKE_CLEANUP_RETRY_DELAY_MS,
+    });
+  } catch {
+    // Temporary smoke directories are intentionally best-effort cleanup.
+  }
+}
+
+export async function runDeferredProviderSmoke(): Promise<readonly ProviderSmokeEvidence[]> {
   const environment = process.env;
   const models = providerSmokeModels();
   const runtime = await loadHardenedRuntime();
@@ -442,53 +478,51 @@ async function runDeferredProviderSmoke(): Promise<readonly ProviderSmokeEvidenc
     join(environment.ProgramFiles ?? 'C:\\Program Files', 'Git', 'cmd', 'git.exe');
   const runtimeDirectory = await mkdtemp(join(tmpdir(), 'orion-provider-smoke-runtime-'));
   let repository: string | undefined;
-  try {
-    const snapshotter = new GitReadRunner(gitExecutable, runtimeDirectory);
-    repository = await createSyntheticPublicRepository(gitExecutable);
-    const schema = join(runtimeDirectory, 'result-schema.json');
-    await writeFile(schema, JSON.stringify(providerSmokeResultSchema), {
-      encoding: 'utf8',
-      mode: 0o600,
-    });
-    const paths = { repository, schema };
-    const baseline = snapshotter.snapshot(repository, 'main');
-    const processPort = new runtime.NativeProviderProcessPort() as SmokeProcessPort;
-    const childEnvironment = runtime.buildProviderEnvironment(environment, []);
-    const codex = await invokeSmokeProvider(
-      {
-        provider: 'openai',
-        executable: codexExecutable,
-        argv: codexSmokeArgv(paths, models.codex),
-        cwd: repository,
-        environment: childEnvironment,
-        permissionMode: 'read-only',
-      },
-      processPort,
-    );
-    const afterCodex = snapshotter.snapshot(repository, 'main');
-    if (!sameSnapshot(baseline, afterCodex)) return [withRepositoryStatus(codex, false)];
+  return runProviderSmokeWithBestEffortCleanup(
+    async () => {
+      const snapshotter = new GitReadRunner(gitExecutable, runtimeDirectory);
+      repository = await createSyntheticPublicRepository(gitExecutable);
+      const schema = join(runtimeDirectory, 'result-schema.json');
+      await writeFile(schema, JSON.stringify(providerSmokeResultSchema), {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
+      const paths = { repository, schema };
+      const baseline = snapshotter.snapshot(repository, 'main');
+      const processPort = new runtime.NativeProviderProcessPort() as SmokeProcessPort;
+      const childEnvironment = runtime.buildProviderEnvironment(environment, []);
+      const codex = await invokeSmokeProvider(
+        {
+          provider: 'openai',
+          executable: codexExecutable,
+          argv: codexSmokeArgv(paths, models.codex),
+          cwd: repository,
+          environment: childEnvironment,
+          permissionMode: 'read-only',
+        },
+        processPort,
+      );
+      const afterCodex = snapshotter.snapshot(repository, 'main');
+      if (!sameSnapshot(baseline, afterCodex)) return [withRepositoryStatus(codex, false)];
 
-    const claude = await invokeSmokeProvider(
-      {
-        provider: 'anthropic',
-        executable: claudeExecutable,
-        argv: claudeSmokeArgv(paths, models.claude),
-        cwd: repository,
-        environment: childEnvironment,
-        permissionMode: 'dontAsk-read-only-tools',
-      },
-      processPort,
-    );
-    const afterClaude = snapshotter.snapshot(repository, 'main');
-    const afterBoth = snapshotter.snapshot(repository, 'main');
-    const unchanged = sameSnapshot(baseline, afterClaude) && sameSnapshot(baseline, afterBoth);
-    return [withRepositoryStatus(codex, unchanged), withRepositoryStatus(claude, unchanged)];
-  } finally {
-    await Promise.all([
-      ...(repository === undefined ? [] : [rm(repository, { recursive: true, force: true })]),
-      rm(runtimeDirectory, { recursive: true, force: true }),
-    ]);
-  }
+      const claude = await invokeSmokeProvider(
+        {
+          provider: 'anthropic',
+          executable: claudeExecutable,
+          argv: claudeSmokeArgv(paths, models.claude),
+          cwd: repository,
+          environment: childEnvironment,
+          permissionMode: 'dontAsk-read-only-tools',
+        },
+        processPort,
+      );
+      const afterClaude = snapshotter.snapshot(repository, 'main');
+      const afterBoth = snapshotter.snapshot(repository, 'main');
+      const unchanged = sameSnapshot(baseline, afterClaude) && sameSnapshot(baseline, afterBoth);
+      return [withRepositoryStatus(codex, unchanged), withRepositoryStatus(claude, unchanged)];
+    },
+    () => [repository, runtimeDirectory],
+  );
 }
 
 async function loadHardenedRuntime(): Promise<{
