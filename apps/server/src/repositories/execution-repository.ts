@@ -39,6 +39,29 @@ export interface TransitionCommand {
     readonly timestamp?: string;
   };
 }
+export interface ProviderRunEventCommand {
+  readonly event: TransitionCommand['event'];
+  readonly status?: RunStatus;
+  readonly sessionId?: string;
+  readonly completedAt?: string;
+}
+
+export interface TaskEventBounds {
+  readonly minSequence: number | null;
+  readonly maxSequence: number;
+}
+
+export interface TaskEventSnapshot {
+  readonly taskId: string;
+  readonly status: TaskStatus;
+  readonly highWaterSequence: number;
+  readonly runs: readonly {
+    readonly id: string;
+    readonly status: RunStatus;
+    readonly provider: 'openai' | 'anthropic';
+    readonly model: string;
+  }[];
+}
 
 export class ExecutionRepository {
   public constructor(
@@ -226,6 +249,153 @@ export class ExecutionRepository {
       return parsed;
     });
   }
+  public persistProviderRunEvent(runId: string, command: ProviderRunEventCommand): Event {
+    const timestamp = command.event.timestamp ?? this.now().toISOString();
+    return withImmediateTransaction(this.database, () => {
+      const current = this.transitionContext('run', runId);
+      const nextStatus = command.status ?? (current.status as RunStatus);
+      if (nextStatus !== current.status)
+        assertRunTransition(current.status as RunStatus, nextStatus);
+      const startedAt = nextStatus === 'running' ? timestamp : null;
+      const completedAt =
+        nextStatus === 'succeeded' ||
+        nextStatus === 'failed' ||
+        nextStatus === 'timed_out' ||
+        nextStatus === 'cancelled' ||
+        nextStatus === 'interrupted'
+          ? (command.completedAt ?? timestamp)
+          : null;
+      const changed = this.database
+        .prepare(
+          `UPDATE runs
+           SET status = ?, session_id = COALESCE(?, session_id),
+               started_at = COALESCE(started_at, ?), completed_at = COALESCE(?, completed_at)
+           WHERE id = ? AND status = ?`,
+        )
+        .run(
+          nextStatus,
+          command.sessionId ?? null,
+          startedAt,
+          completedAt,
+          runId,
+          current.status,
+        ).changes;
+      if (changed !== 1) {
+        throw new ApplicationError(
+          'INVALID_STATE_TRANSITION',
+          'The current state changed before it could be persisted.',
+          { statusCode: 409 },
+        );
+      }
+      const taskSequence = this.allocateSequence('task_event_sequences', 'task_id', current.taskId);
+      const runSequence = this.allocateSequence('run_event_sequences', 'run_id', runId);
+      const parsed = eventSchema.parse({
+        id: command.event.id ?? ulid(),
+        taskId: current.taskId,
+        stepId: current.stepId,
+        runId,
+        provider: command.event.provider ?? current.provider,
+        type: command.event.type,
+        timestamp,
+        payload: command.event.payload,
+        taskSequence,
+        runSequence,
+      });
+      this.database
+        .prepare(
+          'INSERT INTO events (id, task_id, step_id, run_id, provider, type, timestamp, payload_json, task_sequence, run_sequence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        )
+        .run(
+          parsed.id,
+          parsed.taskId,
+          parsed.stepId,
+          parsed.runId,
+          parsed.provider,
+          parsed.type,
+          parsed.timestamp,
+          JSON.stringify(parsed.payload),
+          parsed.taskSequence,
+          parsed.runSequence,
+        );
+      return parsed;
+    });
+  }
+
+  public persistRunSession(runId: string, sessionId: string): void {
+    const changed = this.database
+      .prepare(
+        `UPDATE runs
+         SET session_id = ?
+         WHERE id = ? AND status IN ('starting', 'running', 'stalled')`,
+      )
+      .run(sessionId, runId).changes;
+    if (changed !== 1) {
+      throw new ApplicationError('INVALID_STATE_TRANSITION', 'The provider run is not active.', {
+        statusCode: 409,
+      });
+    }
+  }
+
+  public taskEventBounds(taskId: string): TaskEventBounds {
+    this.assertTaskExists(taskId);
+    const row = this.database
+      .prepare(
+        'SELECT MIN(task_sequence) AS min_sequence, COALESCE(MAX(task_sequence), 0) AS max_sequence FROM events WHERE task_id = ?',
+      )
+      .get(taskId) as { min_sequence: number | null; max_sequence: number };
+    return { minSequence: row.min_sequence, maxSequence: row.max_sequence };
+  }
+
+  public taskEvents(
+    taskId: string,
+    afterExclusive: number,
+    throughInclusive: number,
+  ): readonly Event[] {
+    return this.database
+      .prepare(
+        `SELECT id, task_id, step_id, run_id, provider, type, timestamp, payload_json, task_sequence, run_sequence
+         FROM events
+         WHERE task_id = ? AND task_sequence > ? AND task_sequence <= ?
+         ORDER BY task_sequence ASC`,
+      )
+      .all(taskId, afterExclusive, throughInclusive)
+      .map((row) => readEventRow(row as unknown as EventRow));
+  }
+
+  public taskSnapshot(taskId: string): TaskEventSnapshot {
+    const task = this.database.prepare('SELECT status FROM tasks WHERE id = ?').get(taskId) as
+      { status: TaskStatus } | undefined;
+    if (task === undefined) throw new ApplicationError('NOT_FOUND', 'The task does not exist.');
+    const bounds = this.taskEventBounds(taskId);
+    const runs = this.database
+      .prepare(
+        `SELECT runs.id, runs.status, runs.provider, runs.model
+         FROM runs JOIN task_steps ON task_steps.id = runs.step_id
+         WHERE task_steps.task_id = ?
+         ORDER BY runs.created_at ASC`,
+      )
+      .all(taskId)
+      .map((row) => {
+        const run = row as {
+          id: string;
+          status: RunStatus;
+          provider: 'openai' | 'anthropic';
+          model: string;
+        };
+        return run;
+      });
+    return { taskId, status: task.status, highWaterSequence: bounds.maxSequence, runs };
+  }
+
+  public runStatus(runId: string): RunStatus {
+    return this.transitionContext('run', runId).status as RunStatus;
+  }
+
+  private assertTaskExists(taskId: string): void {
+    const row = this.database.prepare('SELECT id FROM tasks WHERE id = ?').get(taskId) as
+      { id: string } | undefined;
+    if (row === undefined) throw new ApplicationError('NOT_FOUND', 'The task does not exist.');
+  }
 
   private allocateSequence(
     table: 'task_event_sequences' | 'run_event_sequences',
@@ -304,6 +474,33 @@ export class ExecutionRepository {
       provider: row.provider,
     };
   }
+}
+interface EventRow {
+  readonly id: string;
+  readonly task_id: string;
+  readonly step_id: string | null;
+  readonly run_id: string | null;
+  readonly provider: 'openai' | 'anthropic' | 'system' | null;
+  readonly type: EventType;
+  readonly timestamp: string;
+  readonly payload_json: string;
+  readonly task_sequence: number;
+  readonly run_sequence: number | null;
+}
+
+function readEventRow(row: EventRow): Event {
+  return eventSchema.parse({
+    id: row.id,
+    taskId: row.task_id,
+    stepId: row.step_id,
+    runId: row.run_id,
+    provider: row.provider,
+    type: row.type,
+    timestamp: row.timestamp,
+    payload: JSON.parse(row.payload_json) as EventPayload,
+    taskSequence: row.task_sequence,
+    runSequence: row.run_sequence,
+  });
 }
 
 function assertTransition(entity: TransitionEntity, from: string, to: string): void {

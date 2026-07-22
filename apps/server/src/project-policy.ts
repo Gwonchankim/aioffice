@@ -125,6 +125,28 @@ export class ProjectPolicyService {
         (project.providerPolicy.allowFable || !isFableModel(candidate.model)),
     );
   }
+  /**
+   * Arca selection is intentionally distinct from generic effective-model
+   * filtering: its default and fallback lists never contain Fable.
+   */
+  public arcaCandidates(
+    project: Pick<Project, 'providerPolicy'>,
+    profile: AgentProfileSkeleton,
+  ): readonly EffectiveProviderModel[] {
+    if (!validateProfilePermissions(profile)) return [];
+    return [{ provider: profile.provider, model: profile.model }, ...profile.fallbackModels].filter(
+      (candidate) => project.providerPolicy[candidate.provider] && !isFableModel(candidate.model),
+    );
+  }
+
+  public arcaFallbackCandidates(
+    project: Pick<Project, 'providerPolicy'>,
+    profile: AgentProfileSkeleton,
+  ): readonly EffectiveProviderModel[] {
+    return this.arcaCandidates(project, profile).filter(
+      (candidate) => candidate.provider !== profile.provider || candidate.model !== profile.model,
+    );
+  }
 
   public effectiveProviders(
     project: Pick<Project, 'providerPolicy'>,

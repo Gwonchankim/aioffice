@@ -1,11 +1,20 @@
 import type { DatabaseSync } from 'node:sqlite';
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 import { ulid } from 'ulid';
+import type { AgentRuntimeAdapter, Provider } from '@orion/contracts';
 
 import { getErrorCode, ApplicationError } from './errors.js';
 import { defaultTrustedGitExecutablePath } from './config.js';
 import { registerHealthRoute } from './health.js';
 import { IdempotencyService } from './idempotency.js';
+import { ProviderHealthService } from './provider-health-service.js';
+import { registerProviderRoutes } from './provider-routes.js';
+import { ExecutionRepository } from './repositories/execution-repository.js';
+import {
+  InMemoryTaskEventBroker,
+  registerTaskEventSse,
+  type TaskEventBroker,
+} from './task-event-sse.js';
 import { ProjectPolicyService } from './project-policy.js';
 import { ProjectRegistrationService } from './project-registration.js';
 import { registerProjectRoutes } from './project-routes.js';
@@ -30,6 +39,9 @@ export interface CreateApplicationOptions {
   readonly resourceReader?: ResourceReader;
   readonly now?: () => Date;
   readonly requestId?: () => string;
+  readonly providerAdapters?: ReadonlyMap<Provider, AgentRuntimeAdapter>;
+  readonly providerHealth?: ProviderHealthService;
+  readonly taskEventBroker?: TaskEventBroker;
 }
 
 export async function createApplication(
@@ -117,6 +129,24 @@ export async function createApplication(
       });
     });
     const projects = new ProjectRepository(options.database, now);
+    const execution = new ExecutionRepository(options.database, now);
+    const broker = options.taskEventBroker ?? new InMemoryTaskEventBroker();
+    const health =
+      options.providerHealth ?? new ProviderHealthService(options.providerAdapters, now);
+    registerProviderRoutes(app, {
+      security,
+      health,
+      idempotency: new IdempotencyService(new IdempotencyRepository(options.database, now), now),
+      now,
+      requestId,
+    });
+    registerTaskEventSse(app, {
+      security,
+      execution,
+      broker,
+      now,
+      requestId,
+    });
     const confirmations = new ProviderPolicyConfirmationRepository(options.database, now);
     const registration = new ProjectRegistrationService(
       options.database,
@@ -184,6 +214,18 @@ function normalizeErrorCode(code: string): string {
     'MIGRATION_FAILED',
     'DATABASE_UNAVAILABLE',
     'CONTROLLED_EXECUTION_BLOCKED',
+    'PROVIDER_EXECUTABLE_INVALID',
+    'PROVIDER_UNAVAILABLE',
+    'PROVIDER_AUTH_REQUIRED',
+    'PROVIDER_UNSUPPORTED',
+    'PROVIDER_POLICY_REVIEW_REQUIRED',
+    'PROVIDER_THROTTLED',
+    'MODEL_UNAVAILABLE',
+    'ADAPTER_PROTOCOL_ERROR',
+    'OUTPUT_SCHEMA_INVALID',
+    'PROCESS_CRASHED',
+    'RUN_TIMED_OUT',
+    'PROVIDER_EXECUTION_FAILED',
   ]);
   return known.has(code) ? code : 'INTERNAL_ERROR';
 }
