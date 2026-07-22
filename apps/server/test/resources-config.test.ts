@@ -1,3 +1,6 @@
+import { closeSync, mkdtempSync, openSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -15,6 +18,17 @@ function thrownBy(operation: () => void): unknown {
   }
 
   throw new Error('Expected the operation to throw.');
+}
+function writeNativePe(path: string): void {
+  const descriptor = openSync(path, 'w');
+  const header = Buffer.alloc(512);
+  header[0] = 0x4d;
+  header[1] = 0x5a;
+  header.writeUInt32LE(0x80, 0x3c);
+  header[0x80] = 0x50;
+  header[0x81] = 0x45;
+  writeFileSync(descriptor, header);
+  closeSync(descriptor);
 }
 
 describe('server configuration and system resources', () => {
@@ -55,6 +69,30 @@ describe('server configuration and system resources', () => {
     expect(loadServerConfig({ LOCALAPPDATA: 'C:\\runtime' }).port).toBe(DEFAULT_PORT);
   });
 
+  it('accepts optional trusted provider executables and rejects untrusted or PATH inputs', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'orion-provider-config-'));
+    try {
+      const executable = join(directory, 'provider.exe');
+      writeNativePe(executable);
+      const config = loadServerConfig({
+        LOCALAPPDATA: 'C:\\runtime',
+        ORION_CODEX_EXECUTABLE: executable,
+        ORION_CLAUDE_EXECUTABLE: executable,
+      });
+      expect(config.codexExecutable).toContain('provider.exe');
+      expect(config.claudeExecutable).toContain('provider.exe');
+      expect(loadServerConfig({ LOCALAPPDATA: 'C:\\runtime' })).not.toHaveProperty(
+        'codexExecutable',
+      );
+      expect(
+        thrownBy(() =>
+          loadServerConfig({ LOCALAPPDATA: 'C:\\runtime', ORION_CODEX_EXECUTABLE: 'codex' }),
+        ),
+      ).toMatchObject({ code: 'PROVIDER_EXECUTABLE_INVALID' });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
   it('measures valid system resources and rejects invalid measurements', async () => {
     const reader = new SystemResourceReader({
       freeMemory: () => 25,

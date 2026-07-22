@@ -27,7 +27,19 @@ export type ApplicationErrorCode =
   | 'VALIDATION_FAILED'
   | 'INVALID_STATE_TRANSITION'
   | 'IMMUTABLE_PROFILE_SNAPSHOT'
-  | 'ARCHIVE_APPROVAL_INVALID';
+  | 'ARCHIVE_APPROVAL_INVALID'
+  | 'PROVIDER_EXECUTABLE_INVALID'
+  | 'PROVIDER_UNAVAILABLE'
+  | 'PROVIDER_AUTH_REQUIRED'
+  | 'PROVIDER_UNSUPPORTED'
+  | 'PROVIDER_POLICY_REVIEW_REQUIRED'
+  | 'PROVIDER_THROTTLED'
+  | 'MODEL_UNAVAILABLE'
+  | 'ADAPTER_PROTOCOL_ERROR'
+  | 'OUTPUT_SCHEMA_INVALID'
+  | 'PROCESS_CRASHED'
+  | 'RUN_TIMED_OUT'
+  | 'PROVIDER_EXECUTION_FAILED';
 
 export class ApplicationError extends Error {
   public readonly code: ApplicationErrorCode;
@@ -107,9 +119,15 @@ function defaultStatus(code: ApplicationErrorCode): number {
     case 'IDEMPOTENCY_REQUIRED':
       return 400;
     case 'VALIDATION_FAILED':
+    case 'PROVIDER_EXECUTABLE_INVALID':
+    case 'PROVIDER_UNSUPPORTED':
+    case 'OUTPUT_SCHEMA_INVALID':
       return 422;
     case 'HEALTH_RESOURCE_MEASUREMENT_FAILED':
     case 'DATABASE_UNAVAILABLE':
+    case 'PROVIDER_UNAVAILABLE':
+    case 'PROVIDER_THROTTLED':
+    case 'PROCESS_CRASHED':
       return 503;
     default:
       return 500;

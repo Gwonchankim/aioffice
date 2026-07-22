@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 
 import { ApplicationError } from './errors.js';
 import { resolveTrustedGitExecutable } from './git-runner.js';
+import { resolveTrustedProviderExecutable } from './providers/trusted-provider-executable.js';
 
 export const LOOPBACK_HOST = '127.0.0.1' as const;
 export const DEFAULT_PORT = 4317;
@@ -17,6 +18,8 @@ export interface ServerConfig {
   readonly port: number;
   readonly runtimeDirectory: string;
   readonly gitExecutable?: string;
+  readonly codexExecutable?: string;
+  readonly claudeExecutable?: string;
 }
 
 export function loadServerConfig(environment: NodeJS.ProcessEnv = process.env): ServerConfig {
@@ -27,6 +30,20 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv = process.env): 
     gitExecutable: resolveTrustedGitExecutable(
       environment.ORION_GIT_EXECUTABLE ?? defaultTrustedGitExecutablePath(environment),
     ),
+    ...(environment.ORION_CODEX_EXECUTABLE === undefined
+      ? {}
+      : {
+          codexExecutable: resolveTrustedProviderExecutable(environment.ORION_CODEX_EXECUTABLE, {
+            projectRoots: [workspaceRoot],
+          }),
+        }),
+    ...(environment.ORION_CLAUDE_EXECUTABLE === undefined
+      ? {}
+      : {
+          claudeExecutable: resolveTrustedProviderExecutable(environment.ORION_CLAUDE_EXECUTABLE, {
+            projectRoots: [workspaceRoot],
+          }),
+        }),
   };
 }
 
