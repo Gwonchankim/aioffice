@@ -8,6 +8,8 @@ export * from './fixtures/degraded-health.js';
 export * from './health.js';
 export * from './plan.js';
 export * from './project-routes.js';
+export * from './provider-routes.js';
+export * from './provider.js';
 export * from './project.js';
 export * from './run.js';
 export * from './task.js';
