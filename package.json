@@ -18,6 +18,7 @@
     "e2e:install": "pnpm exec playwright install chromium",
     "e2e": "pnpm exec playwright test",
     "smoke:workspace-import": "pnpm --filter @orion/orchestration exec node --input-type=module --eval \"await import('./dist/index.js')\" && pnpm --filter @orion/agent-catalog exec node --input-type=module --eval \"await import('./dist/index.js')\" && pnpm --filter @orion/test-fixtures exec node --input-type=module --eval \"await import('./dist/index.js')\"",
+    "test:providers": "pnpm --filter @orion/scripts build && pnpm --filter @orion/scripts exec node dist/provider-smoke.js",
     "dev": "pnpm --filter @orion/scripts dev",
     "start": "pnpm --filter @orion/scripts start"
   },

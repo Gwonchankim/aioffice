@@ -1,6 +1,6 @@
 # Orion Console
 
-Orion Console is a local-first Windows web console. M1 provides a Korean dashboard, a loopback Fastify API, and truthful local SQLite health. It does not start Codex, Claude, providers, schedulers, retention, connectors, or an operational Arca runtime.
+Orion Console is a local-first Windows web console. M2 adds sanitized provider health/refresh routes and authenticated task-event read surfaces, while normal development and CI remain fake-process-only: they never start Codex or Claude or make a model call.
 
 ## Windows prerequisites
 
@@ -52,6 +52,18 @@ Use the same `PLAYWRIGHT_BROWSERS_PATH` value for both browser installation and 
 
 ```powershell
 Remove-Item Env:PLAYWRIGHT_BROWSERS_PATH
+```
+
+## Deferred provider smoke
+
+`pnpm test:providers` is a P4-only command, not part of `pnpm test` or CI. It exits without invoking a provider unless `ORION_REAL_PROVIDER_TESTS=1` is set. The isolated P4 operator must provide trusted absolute native `ORION_CODEX_EXECUTABLE` and `ORION_CLAUDE_EXECUTABLE` values, verify both CLI logins, and run only against the script-created synthetic public Git repository.
+
+The harness invokes each provider at most once with fixed read-only argv, `shell:false`, and a five-minute timeout. It compares private GitReadRunner-style HEAD/index/tracked/untracked/tree snapshots before, after each invocation, and after both; any difference fails closed without retry, resume, or fallback. Its only output is sanitized evidence and never includes a prompt, provider output, repository path/content/hash, credentials, identity, or environment.
+
+```powershell
+$env:ORION_REAL_PROVIDER_TESTS='1'
+pnpm test:providers
+Remove-Item Env:ORION_REAL_PROVIDER_TESTS
 ```
 
 ## Running Orion Console

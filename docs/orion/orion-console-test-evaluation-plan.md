@@ -63,6 +63,12 @@ After `pnpm install --frozen-lockfile`, run `pnpm typecheck`, `pnpm test`, and `
 | Arca metadata boundary | `M1-ARCA-001~014`, `M1-ARCA-ND-001~004`, `M1-ARCA-RAW-001~003`, `M1-ARCA-XFER-001~002`: strict metadata-only schema, authorization-before-search, CAS/lifecycle/audit, raw-field rejection, controlled transfer block을 검증한다. |
 
 M1 증거는 synthetic data만 사용한다. Browser/runtime/result directory와 per-test Git repository는 repository 밖의 고유한 OS-temp path이며 bootstrap coverage에서는 trace, screenshot, video, retained Playwright output을 비활성화한다.
+### 3.1.1 M2 provider and SSE evidence
+
+- `PRV-001~005`: fake-process-only Codex/Claude inspection, fixed argv/capability/login classification, sanitized provider health collection, and refresh idempotency; API evidence excludes account, token, executable path, raw output, and environment.
+- `EVT-001~015`: JSONL/stream-json chunk handling, final `RunResult`, persisted session/resume metadata, cancellation/timeout ownership, and authenticated SSE replay/reset snapshot. SSE tests prove the session check occurs before task lookup, replay, broker subscription, timer, or queue allocation.
+- `M1-API-001~002` additionally require generated OpenAPI/Fastify parity for provider health/refresh, task event stream, and authenticated reset snapshot, including JSON versus `text/event-stream` response contracts.
+
 
 ### 3.2 Arca M1-M5 미래 계약 추적성
 M1에서 ARCA-003~014는 metadata-only implementation evidence로 전환한다. ARCA-001~002와 ARCA-015~016의 future runtime behavior는 각 milestone 전까지 운영 기능으로 만들지 않는다.
@@ -370,24 +376,16 @@ Critical·High 결과가 하나라도 남으면 출시를 차단한다.
 
 ### 9.1 실행 조건
 
-- 두 CLI login status 정상
-- public 등급의 임시 Git 저장소
-- read-only sandbox/permission
-- 외부 행동·웹 조회·파일 쓰기 금지
-- 사용자가 `ORION_REAL_PROVIDER_TESTS=1` 설정
+- P3/CI/기본 `pnpm test`에서는 실행하지 않으며, 별도 P4 validation worker만 `ORION_REAL_PROVIDER_TESTS=1`로 `pnpm test:providers`를 실행한다.
+- 두 CLI login status와 trusted absolute native `ORION_CODEX_EXECUTABLE`/`ORION_CLAUDE_EXECUTABLE`를 P4가 먼저 확인한다.
+- harness가 source repository 밖에 만든 synthetic public temporary Git repository만 사용한다. 실제 회사 repository, web lookup, write tool, retry, fallback, resume은 금지한다.
+- Codex는 정확히 한 번 `exec --json --sandbox read-only --cd <repo> --output-schema <schema> --model <approved> -`를 실행하고, Claude는 정확히 한 번 `--print --output-format stream-json --verbose --json-schema <schema> --model sonnet --effort low --permission-mode dontAsk --allowedTools Read,Glob,Grep --disallowedTools Bash,Edit,Write,WebFetch,WebSearch --max-budget-usd 0.50`를 실행한다. 둘 다 `shell:false`, stdin prompt, invocation별 5분 timeout이다.
 
-### 9.2 과제
+### 9.2 불변성 및 evidence
 
-Codex와 Claude 각각 저장소의 파일 수와 언어를 읽고 구조화된 RunResult로 반환한다.
-
-검증:
-
-- session ID 저장
-- streaming event 수신
-- final schema 통과
-- token·duration 기록
-- 계정정보·secret 미노출
-
+- GitReadRunner 방식의 private HEAD/index/tracked/untracked/file-tree snapshot을 첫 실행 전, Codex 후, Claude 후, 둘 다 끝난 후에 비교한다. 차이는 fail-closed이며 그 뒤 provider 실행, retry, fallback을 하지 않는다.
+- evidence는 provider, CLI version, executable basename/fingerprint, invocation count, reported model, permission/sandbox mode, start/end/duration, exit class, normalized event counts, one-way session-ID hash, strict result, `repositoryUnchanged`, child-process count, usage/cost, sanitizer finding count만 포함한다.
+- prompt, stdout/stderr, token/auth/account/email/org, executable search path, repository path/content/hash/manifest, full environment, transcript은 evidence·log·report에 저장하지 않는다.
 ## 10. 증거와 리포트
 
 테스트 run마다 다음을 `artifacts/evaluation/<run-id>`에 보존한다.

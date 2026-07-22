@@ -54,6 +54,7 @@ M0 will provide these root commands in `package.json` during S1-S8. They do **no
 - `pnpm e2e`
 - `pnpm dev`
 - `pnpm start`
+- `pnpm test:providers` (P4 only; requires explicit `ORION_REAL_PROVIDER_TESTS=1` and is never part of `pnpm test` or CI)
 
 `pnpm typecheck`, `pnpm test`, and `pnpm test:coverage` are self-contained after install: each prepares the required workspace package outputs with explicit prerequisite chaining and does not require an earlier manual `pnpm build` or pre/post lifecycle hook. `pnpm build` remains required before `pnpm smoke:workspace-import` and production start.
 

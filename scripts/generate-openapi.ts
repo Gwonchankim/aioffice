@@ -17,6 +17,12 @@ import {
   projectListSuccessSchema,
   projectRouteRegistry,
   projectWithGitStatusSuccessSchema,
+  providerHealthCollectionSuccessSchema,
+  providerRouteRegistry,
+  runStatusSchema,
+  successEnvelopeSchema,
+  taskStatusSchema,
+  ulidSchema,
 } from '@orion/contracts';
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const workspaceRoot = resolve(
@@ -30,7 +36,7 @@ extendZodWithOpenApi(contractZod as never);
 
 export const openApiOutputPath = resolve(workspaceRoot, 'openapi/orion-local-m1.openapi.json');
 
-export const exposedM1Operations = [
+export const exposedApiOperations = [
   { method: 'GET', path: '/api/v1/health', operationId: 'getHealth' },
   { method: 'POST', path: '/api/v1/session/bootstrap', operationId: 'bootstrapSession' },
   {
@@ -63,6 +69,26 @@ export const exposedM1Operations = [
     path: projectRouteRegistry.deleteProject.path,
     operationId: 'deleteProject',
   },
+  {
+    method: providerRouteRegistry.listProviders.method,
+    path: providerRouteRegistry.listProviders.path,
+    operationId: 'listProviders',
+  },
+  {
+    method: providerRouteRegistry.refreshProviders.method,
+    path: providerRouteRegistry.refreshProviders.path,
+    operationId: 'refreshProviders',
+  },
+  {
+    method: 'GET',
+    path: '/api/v1/tasks/{id}/events',
+    operationId: 'streamTaskEvents',
+  },
+  {
+    method: 'GET',
+    path: '/api/v1/tasks/{id}/events/snapshot',
+    operationId: 'getTaskEventSnapshot',
+  },
 ] as const;
 
 function jsonResponse(schema: unknown, description: string): ResponseConfig {
@@ -79,6 +105,21 @@ function headers(...names: string[]) {
     required: true,
     schema: { type: 'string' as const, minLength: 1 },
   }));
+}
+
+function optionalHeader(name: string, schema: Record<string, unknown>) {
+  return [{ name, in: 'header' as const, required: false, schema }];
+}
+
+function streamResponse(description: string): ResponseConfig {
+  return {
+    description,
+    content: {
+      'text/event-stream': {
+        schema: { type: 'string', format: 'event-stream' },
+      },
+    },
+  };
 }
 
 function responseSchemas(
@@ -132,6 +173,32 @@ function routes(registry: OpenAPIRegistry): RouteConfig[] {
       },
     },
   });
+  const providerHealthCollectionSuccess = registry.register(
+    'ProviderHealthCollectionSuccess',
+    providerHealthCollectionSuccessSchema,
+  );
+  const taskEventSnapshotSuccess = registry.register(
+    'TaskEventSnapshotSuccess',
+    successEnvelopeSchema(
+      contractZod
+        .object({
+          taskId: ulidSchema,
+          status: taskStatusSchema,
+          highWaterSequence: contractZod.number().int().nonnegative(),
+          runs: contractZod.array(
+            contractZod
+              .object({
+                id: ulidSchema,
+                status: runStatusSchema,
+                provider: contractZod.enum(['openai', 'anthropic']),
+                model: contractZod.string().min(1).max(128),
+              })
+              .strict(),
+          ),
+        })
+        .strict(),
+    ),
+  );
 
   return [
     {
@@ -152,6 +219,65 @@ function routes(registry: OpenAPIRegistry): RouteConfig[] {
         201: jsonResponse(bootstrapSuccess, 'Session established.'),
         401: jsonResponse(error, 'Bootstrap token rejected.'),
         403: jsonResponse(error, 'Origin rejected.'),
+      },
+    },
+    {
+      method: 'get',
+      path: providerRouteRegistry.listProviders.path,
+      operationId: 'listProviders',
+      parameters: headers('cookie'),
+      responses: responseSchemas(
+        providerRouteRegistry.listProviders.responses,
+        providerHealthCollectionSuccess,
+        error,
+      ),
+    },
+    {
+      method: 'post',
+      path: providerRouteRegistry.refreshProviders.path,
+      operationId: 'refreshProviders',
+      parameters: headers('cookie', 'origin', 'x-csrf-token', 'idempotency-key'),
+      request: {
+        body: {
+          content: { 'application/json': { schema: providerRouteRegistry.refreshProviders.body } },
+        },
+      },
+      responses: responseSchemas(
+        providerRouteRegistry.refreshProviders.responses,
+        providerHealthCollectionSuccess,
+        error,
+      ),
+    },
+    {
+      method: 'get',
+      path: '/api/v1/tasks/{id}/events',
+      operationId: 'streamTaskEvents',
+      parameters: [
+        ...headers('cookie'),
+        ...optionalHeader('last-event-id', {
+          type: 'string',
+          pattern: '^[1-9][0-9]*$',
+        }),
+      ],
+      request: { params: contractZod.object({ id: ulidSchema }).strict() },
+      responses: {
+        200: streamResponse('Authenticated task event replay and live stream.'),
+        401: jsonResponse(error, 'Session required.'),
+        404: jsonResponse(error, 'Task not found.'),
+        422: jsonResponse(error, 'Invalid task identifier.'),
+      },
+    },
+    {
+      method: 'get',
+      path: '/api/v1/tasks/{id}/events/snapshot',
+      operationId: 'getTaskEventSnapshot',
+      parameters: headers('cookie'),
+      request: { params: contractZod.object({ id: ulidSchema }).strict() },
+      responses: {
+        200: jsonResponse(taskEventSnapshotSuccess, 'Authenticated task event reset snapshot.'),
+        401: jsonResponse(error, 'Session required.'),
+        404: jsonResponse(error, 'Task not found.'),
+        422: jsonResponse(error, 'Invalid task identifier.'),
       },
     },
     {

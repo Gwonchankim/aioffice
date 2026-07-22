@@ -971,6 +971,182 @@
         },
         "required": ["data", "meta"],
         "additionalProperties": false
+      },
+      "ProviderHealthCollectionSuccess": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "providers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "provider": {
+                      "type": "string",
+                      "enum": ["openai", "anthropic"]
+                    },
+                    "installed": {
+                      "type": "boolean"
+                    },
+                    "cliVersion": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "authenticated": {
+                      "type": "boolean"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ready",
+                        "not_installed",
+                        "unsupported",
+                        "unauthenticated",
+                        "untested",
+                        "policy_review_required",
+                        "error"
+                      ]
+                    },
+                    "supportedModels": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "minItems": 0,
+                      "maxItems": 128
+                    },
+                    "lastCheckedAt": {
+                      "type": "string"
+                    },
+                    "sanitizedError": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "provider",
+                    "installed",
+                    "cliVersion",
+                    "authenticated",
+                    "status",
+                    "supportedModels",
+                    "lastCheckedAt",
+                    "sanitizedError"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 1,
+                "maxItems": 2
+              }
+            },
+            "required": ["providers"],
+            "additionalProperties": false
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "requestId": {
+                "type": "string",
+                "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+              },
+              "timestamp": {
+                "type": "string"
+              }
+            },
+            "required": ["requestId", "timestamp"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["data", "meta"],
+        "additionalProperties": false
+      },
+      "TaskEventSnapshotSuccess": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "taskId": {
+                "type": "string",
+                "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "draft",
+                  "planning",
+                  "queued",
+                  "running",
+                  "waiting_approval",
+                  "succeeded",
+                  "failed",
+                  "cancelled",
+                  "limit_reached"
+                ]
+              },
+              "highWaterSequence": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "runs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "starting",
+                        "running",
+                        "stalled",
+                        "succeeded",
+                        "failed",
+                        "timed_out",
+                        "cancelled",
+                        "interrupted"
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "enum": ["openai", "anthropic"]
+                    },
+                    "model": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": ["id", "status", "provider", "model"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["taskId", "status", "highWaterSequence", "runs"],
+            "additionalProperties": false
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "requestId": {
+                "type": "string",
+                "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+              },
+              "timestamp": {
+                "type": "string"
+              }
+            },
+            "required": ["requestId", "timestamp"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["data", "meta"],
+        "additionalProperties": false
       }
     },
     "parameters": {}
@@ -1052,6 +1228,304 @@
           },
           "403": {
             "description": "Origin rejected.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers": {
+      "get": {
+        "operationId": "listProviders",
+        "parameters": [
+          {
+            "name": "cookie",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTTP 200 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderHealthCollectionSuccess"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "HTTP 401 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/refresh": {
+      "post": {
+        "operationId": "refreshProviders",
+        "parameters": [
+          {
+            "name": "cookie",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "HTTP 200 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderHealthCollectionSuccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "HTTP 400 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "HTTP 401 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "HTTP 403 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "HTTP 409 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "HTTP 422 response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{id}/events": {
+      "get": {
+        "operationId": "streamTaskEvents",
+        "parameters": [
+          {
+            "name": "cookie",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "last-event-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$"
+            }
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authenticated task event replay and live stream.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "event-stream"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Session required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid task identifier.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{id}/events/snapshot": {
+      "get": {
+        "operationId": "getTaskEventSnapshot",
+        "parameters": [
+          {
+            "name": "cookie",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authenticated task event reset snapshot.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskEventSnapshotSuccess"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Session required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid task identifier.",
             "content": {
               "application/json": {
                 "schema": {
