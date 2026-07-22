@@ -27,6 +27,9 @@
 | Agent Eval | 고정 과제 + rubric | 역할 품질·handoff·안전 | O/모의 병행 |
 
 기본 `pnpm test`와 CI는 실제 모델을 호출하지 않는다. 실제 호출은 `ORION_REAL_PROVIDER_TESTS=1`이 있을 때만 수행한다.
+### 2.1 Standard root verification command order
+
+After `pnpm install --frozen-lockfile`, run `pnpm typecheck`, `pnpm test`, and `pnpm test:coverage`; each is self-contained and builds required workspace package outputs without a prior manual `pnpm build`. The coverage gate retains line coverage of at least 80% for all seven configured targets. Run `pnpm build` before `pnpm smoke:workspace-import` to verify production artifacts.
 
 ## 3. 요구사항 추적표
 

@@ -19,6 +19,7 @@ pnpm --version
 ## Fresh Windows reproduction
 
 Run the following from the repository root. This is the required command order for a clean reproduction. `pnpm start` runs in the foreground; stop it safely before clearing the temporary browser-path environment variable.
+`pnpm typecheck`, `pnpm test`, and `pnpm test:coverage` are self-contained after install: each builds the required workspace package outputs automatically, so no prior manual `pnpm build` is needed. `pnpm build` is still required immediately before `pnpm smoke:workspace-import` and production start.
 
 ```powershell
 pnpm install --frozen-lockfile

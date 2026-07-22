@@ -55,6 +55,8 @@ M0 will provide these root commands in `package.json` during S1-S8. They do **no
 - `pnpm dev`
 - `pnpm start`
 
+`pnpm typecheck`, `pnpm test`, and `pnpm test:coverage` are self-contained after install: each prepares the required workspace package outputs with explicit prerequisite chaining and does not require an earlier manual `pnpm build` or pre/post lifecycle hook. `pnpm build` remains required before `pnpm smoke:workspace-import` and production start.
+
 When available, lint errors and typecheck errors must be zero; tests and build must pass; each approved executable coverage target must meet its threshold; E2E P0 must pass completely; accessibility must have zero axe Critical violations.
 
 ## 6. Security, Classification, and Secrets

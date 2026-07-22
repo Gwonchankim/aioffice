@@ -348,6 +348,9 @@ P3 IMPLEMENT PASS 조건:
 
 P3 IMPLEMENT 완료는 제품 완성을 의미하지 않는다. 마지막 상태는 `READY_FOR_VALIDATION`으로 보고하고 P4 VALIDATE에 handoff하라.
 ```
+### Root verification command contract
+
+P3 and P4 workers must treat `pnpm typecheck`, `pnpm test`, and `pnpm test:coverage` as self-contained after `pnpm install --frozen-lockfile`: each prepares required workspace package outputs without a manual `pnpm build` or lifecycle-hook reliance. Run `pnpm build` before `pnpm smoke:workspace-import` or production start. P4 validates each root gate in a separate clean checkout and must not reuse prior `dist/` output.
 
 ## 7. P4 VALIDATE — 검증 및 평가 프롬프트
 

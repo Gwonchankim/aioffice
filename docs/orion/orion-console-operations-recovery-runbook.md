@@ -32,6 +32,7 @@ pnpm test
 pnpm build
 pnpm start
 ```
+`pnpm typecheck`, `pnpm test`, and `pnpm test:coverage` (when run) each prepare the required workspace package outputs after install, so no manual `pnpm build` is needed first. `pnpm build` still precedes `pnpm smoke:workspace-import` and production start.
 
 제품 서버는 기본 `127.0.0.1:4317`을 사용하고 충돌 시 다음 포트를 찾은 뒤 브라우저를 자동으로 연다.
 
