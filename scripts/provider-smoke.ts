@@ -51,32 +51,120 @@ export const DEFAULT_CLAUDE_SMOKE_MODEL = 'sonnet';
 export const PROVIDER_SMOKE_CLEANUP_MAX_RETRIES = 3;
 export const PROVIDER_SMOKE_CLEANUP_RETRY_DELAY_MS = 100;
 
-/** Bumped for the SMG-008 execution-isolation flags; bound into and re-checked against the grant. */
-export const ARGV_POLICY_VERSION = 2;
+/** Official empty Claude MCP configuration (0 servers); replaces the bare `{}` which is not the
+ * official shape and is rejected by the CLI's strict MCP validation. */
+export const CLAUDE_EMPTY_MCP_CONFIG = JSON.stringify({ mcpServers: {} });
+
+/** Bumped when the argv/schema/prompt smoke policy changes; bound into and re-checked against the
+ * grant so any prior grant fails policy_binding_mismatch. v3: strict schema items + provider-neutral
+ * prompt + official empty MCP config. */
+export const ARGV_POLICY_VERSION = 3;
 export const REPOSITORY_TEMPLATE_VERSION = 1;
 
 export const EVIDENCE_SCHEMA_VERSION = 1 as const;
 
+// Strict structured-output JSON Schema accepted by BOTH providers:
+// - every array carries a real `items` schema; every object has `additionalProperties:false`
+//   and lists ALL of its properties in `required` (OpenAI structured-outputs strict mode);
+//   optional runResult fields are required+nullable (`type:['string','null']`).
+// - NO `maxItems`/`minLength`/`format`: Anthropic structured outputs reject array constraints
+//   other than `minItems` 0/1, so emptiness+success are enforced smoke-locally (smokeResultIsStrict),
+//   not via the schema. The empty succeeded result still passes this schema AND runResultSchema.
 export const providerSmokeResultSchema = {
   type: 'object',
   additionalProperties: false,
   required: ['status', 'summary', 'findings', 'artifacts', 'changes', 'tests', 'risks', 'handoff'],
   properties: {
-    status: { type: 'string', enum: ['succeeded', 'failed', 'needs_attention'] },
-    summary: { type: 'string', minLength: 1 },
-    findings: { type: 'array' },
-    artifacts: { type: 'array' },
-    changes: { type: 'array' },
-    tests: { type: 'array' },
-    risks: { type: 'array' },
-    handoff: { type: 'string', minLength: 1 },
+    status: { type: 'string', enum: ['succeeded'] },
+    summary: { type: 'string' },
+    findings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['severity', 'text', 'evidence'],
+        properties: {
+          severity: { type: 'string', enum: ['info', 'low', 'medium', 'high', 'critical'] },
+          text: { type: 'string' },
+          evidence: { type: ['string', 'null'] },
+        },
+      },
+    },
+    artifacts: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['kind', 'path', 'title', 'description'],
+        properties: {
+          kind: { type: 'string' },
+          path: { type: ['string', 'null'] },
+          title: { type: 'string' },
+          description: { type: ['string', 'null'] },
+        },
+      },
+    },
+    changes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['commitSha', 'files', 'description'],
+        properties: {
+          commitSha: { type: ['string', 'null'] },
+          files: { type: 'array', items: { type: 'string' } },
+          description: { type: 'string' },
+        },
+      },
+    },
+    tests: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['command', 'status', 'summary'],
+        properties: {
+          command: { type: 'string' },
+          status: { type: 'string', enum: ['passed', 'failed', 'not_run'] },
+          summary: { type: 'string' },
+        },
+      },
+    },
+    risks: { type: 'array', items: { type: 'string' } },
+    handoff: { type: 'string' },
   },
 } as const;
 
+// Provider-NEUTRAL prompt (no provider-specific tool names): each provider enforces read-only
+// access through its own argv (Codex `--sandbox read-only`; Claude `--allowedTools/--disallowedTools`).
 const smokePrompt = [
-  'Inspect only this synthetic public repository without writing files or using network tools.',
-  'Return a strict RunResult that states the file count and detected languages.',
+  'Inspect this synthetic public repository in a strictly read-only way.',
+  'Do not modify or create any file, do not run shell, bash, or git commands, do not access the network, do not run tests, and do not create artifacts.',
+  'Return a strict JSON RunResult that exactly matches the provided schema:',
+  'status must be "succeeded";',
+  'summary must state the number of files and the detected programming languages;',
+  'findings, artifacts, changes, tests, and risks must each be an empty array [];',
+  'handoff must confirm that the read-only inspection completed.',
 ].join(' ');
+
+/**
+ * Authoritative smoke strict-result check: the model output must pass the Zod runResultSchema AND
+ * report status `succeeded` AND leave all five arrays empty. This enforces the smoke's empty-result
+ * contract locally (the JSON schema cannot, because Anthropic rejects `maxItems`).
+ */
+export function smokeResultIsStrict(candidate: unknown): boolean {
+  const parsed = runResultSchema.safeParse(candidate);
+  if (!parsed.success) return false;
+  const result = parsed.data;
+  return (
+    result.status === 'succeeded' &&
+    result.findings.length === 0 &&
+    result.artifacts.length === 0 &&
+    result.changes.length === 0 &&
+    result.tests.length === 0 &&
+    result.risks.length === 0
+  );
+}
 
 export type SmokeProvider = 'openai' | 'anthropic';
 export type CleanupStatus = 'complete' | 'incomplete' | 'not_reached';
@@ -143,6 +231,7 @@ export interface ProviderSmokeEvidence {
   readonly reportedCost: number | null;
   readonly sanitizerFindingCount: number;
   readonly errorCode?: string;
+  readonly diagnostic?: ProviderDiagnosticCode;
 }
 
 export interface ProviderSmokeEnvelope {
@@ -297,7 +386,7 @@ export function claudeSmokeArgv(paths: ProviderSmokePaths, model: string): reado
     '--no-session-persistence',
     '--strict-mcp-config',
     '--mcp-config',
-    '{}',
+    CLAUDE_EMPTY_MCP_CONFIG,
     '--disable-slash-commands',
     '--max-budget-usd',
     String(PROVIDER_SMOKE_MAX_BUDGET_USD),
@@ -353,7 +442,11 @@ export async function invokeSmokeProvider(
         consumeSanitizerStream(child.stderr, summary),
       ]);
       childProcessCount += await child.countOwnedDescendants();
-      exitClassification = classifyExit(exit, timedOut, summary.strictResult);
+      exitClassification = classifyExit(
+        exit,
+        timedOut,
+        summary.hasStrictResult && !summary.terminalFailure,
+      );
       reachedStage = 'invocation_completed';
     } finally {
       clearTimeout(timeout);
@@ -363,6 +456,13 @@ export async function invokeSmokeProvider(
   }
 
   const ended = now();
+  const strictResult = summary.hasStrictResult && !summary.terminalFailure;
+  const diagnostic: ProviderDiagnosticCode | undefined =
+    exitClassification === 'succeeded'
+      ? undefined
+      : (summary.frameDiagnostic ??
+        classifyProviderDiagnostic(summary.stderrBuffer) ??
+        'UNKNOWN_PROVIDER_FAILURE');
   return {
     provider: invocation.provider,
     reachedStage,
@@ -379,7 +479,8 @@ export async function invokeSmokeProvider(
     exitClassification,
     normalizedEventCounts: summary.normalizedEventCounts,
     sessionIdHash: summary.sessionIdHash,
-    strictResult: summary.strictResult,
+    strictResult,
+    ...(diagnostic === undefined ? {} : { diagnostic }),
     repositoryUnchanged: true,
     childProcessCount,
     reportedUsage: Object.keys(summary.usage).length === 0 ? null : summary.usage,
@@ -388,12 +489,149 @@ export async function invokeSmokeProvider(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Sanitized failure diagnostics (CFG-004/005/006): map bounded stderr / terminal failure frames to
+// a closed enum of generic codes. Raw stderr/stdout/message text is NEVER retained.
+// ---------------------------------------------------------------------------
+export type ProviderDiagnosticCode =
+  | 'MODEL_UNAVAILABLE'
+  | 'INVALID_OUTPUT_SCHEMA'
+  | 'INVALID_ARGUMENT'
+  | 'INVALID_MCP_CONFIG'
+  | 'AUTHENTICATION_FAILED'
+  | 'PERMISSION_DENIED'
+  | 'RATE_LIMITED'
+  | 'NETWORK_UNAVAILABLE'
+  | 'PROVIDER_INTERNAL_ERROR'
+  | 'UNKNOWN_PROVIDER_FAILURE';
+
+export const DIAGNOSTIC_MAX_BYTES = 16384;
+
+// Priority-ordered matchers; the FIRST matching rule (top to bottom) wins. Each `all` term must be
+// present. Only the code is returned; the matched text is discarded.
+const DIAGNOSTIC_RULES: ReadonlyArray<{ code: ProviderDiagnosticCode; any: readonly string[] }> = [
+  {
+    code: 'INVALID_MCP_CONFIG',
+    any: ['mcpservers', 'mcp config', 'mcp-config', 'mcp server', 'invalid mcp', 'strict mcp'],
+  },
+  {
+    code: 'INVALID_OUTPUT_SCHEMA',
+    any: [
+      'output schema',
+      'output-schema',
+      'json schema',
+      'json-schema',
+      'response_format',
+      'structured output',
+      'additionalproperties',
+      'maxitems',
+      'invalid schema',
+      'schema is invalid',
+      'schema must',
+      'required property',
+      'unsupported schema',
+    ],
+  },
+  {
+    code: 'INVALID_ARGUMENT',
+    any: [
+      'unknown option',
+      'unknown flag',
+      'unrecognized',
+      'unexpected argument',
+      'invalid argument',
+      'invalid option',
+      'invalid flag',
+      'no such option',
+    ],
+  },
+  {
+    code: 'MODEL_UNAVAILABLE',
+    any: [
+      'unknown model',
+      'no such model',
+      'model not found',
+      'model is not',
+      'model unavailable',
+      'model does not exist',
+      'invalid model',
+      'unsupported model',
+      'model not supported',
+      'model is deprecated',
+      'no access to model',
+    ],
+  },
+  {
+    code: 'AUTHENTICATION_FAILED',
+    any: [
+      'unauthenticated',
+      'unauthorized',
+      'authentication',
+      'not logged in',
+      'invalid api key',
+      'invalid token',
+      'login required',
+      '401',
+    ],
+  },
+  {
+    code: 'PERMISSION_DENIED',
+    any: ['permission denied', 'forbidden', 'not allowed', 'access denied', '403'],
+  },
+  {
+    code: 'RATE_LIMITED',
+    any: ['rate limit', 'rate-limit', 'ratelimit', 'too many requests', 'quota', '429'],
+  },
+  {
+    code: 'NETWORK_UNAVAILABLE',
+    any: [
+      'econnrefused',
+      'etimedout',
+      'enotfound',
+      'network',
+      'dns',
+      'connection refused',
+      'offline',
+      'proxy',
+      'tls handshake',
+    ],
+  },
+  {
+    code: 'PROVIDER_INTERNAL_ERROR',
+    any: [
+      'internal server error',
+      'internal error',
+      '500',
+      '502',
+      '503',
+      '504',
+      'panic',
+      'segfault',
+      'unexpected error',
+    ],
+  },
+];
+
+/** Classify bounded text into a generic diagnostic code. `undefined` when the text is empty. */
+export function classifyProviderDiagnostic(text: string): ProviderDiagnosticCode | undefined {
+  const bounded = text.slice(0, DIAGNOSTIC_MAX_BYTES).toLowerCase();
+  if (bounded.trim().length === 0) return undefined;
+  for (const rule of DIAGNOSTIC_RULES) {
+    if (rule.any.some((needle) => bounded.includes(needle))) return rule.code;
+  }
+  return 'UNKNOWN_PROVIDER_FAILURE';
+}
+
 interface ProviderSummary {
   cliVersion: string | null;
   modelReported: string | null;
   normalizedEventCounts: Record<string, number>;
   sessionIdHash: string | null;
-  strictResult: boolean;
+  hasStrictResult: boolean;
+  terminalFailure: boolean;
+  frameDiagnostic: ProviderDiagnosticCode | undefined;
+  stderrBuffer: string; // transient bounded buffer; classified then discarded, never in evidence
+  stderrBufferBytes: number;
   usage: Usage;
   reportedCost: number | null;
   sanitizerFindingCount: number;
@@ -405,7 +643,11 @@ function createSummary(): ProviderSummary {
     modelReported: null,
     normalizedEventCounts: {},
     sessionIdHash: null,
-    strictResult: false,
+    hasStrictResult: false,
+    terminalFailure: false,
+    frameDiagnostic: undefined,
+    stderrBuffer: '',
+    stderrBufferBytes: 0,
     usage: {},
     reportedCost: null,
     sanitizerFindingCount: 0,
@@ -433,8 +675,15 @@ async function consumeSanitizerStream(
   stream: AsyncIterable<Uint8Array>,
   summary: ProviderSummary,
 ): Promise<void> {
-  for await (const chunk of stream)
-    summary.sanitizerFindingCount += sanitizerFindings(chunk.toString());
+  for await (const chunk of stream) {
+    const text = chunk.toString();
+    summary.sanitizerFindingCount += sanitizerFindings(text);
+    if (summary.stderrBufferBytes < DIAGNOSTIC_MAX_BYTES) {
+      const bounded = text.slice(0, DIAGNOSTIC_MAX_BYTES - summary.stderrBufferBytes);
+      summary.stderrBuffer += bounded;
+      summary.stderrBufferBytes += bounded.length;
+    }
+  }
 }
 
 function inspectProviderFrame(
@@ -449,17 +698,68 @@ function inspectProviderFrame(
   } catch {
     return;
   }
-  if (isRecord(frame)) captureCliVersion(frame, summary);
+  if (isRecord(frame)) {
+    captureCliVersion(frame, summary);
+    captureFailureFrame(provider, frame, summary);
+  }
   const normalized: NormalizedFrame =
     provider === 'openai' ? normalizeCodexFrame(frame) : normalizeClaudeFrame(frame);
   if (normalized.kind !== 'recognized') return;
 
   for (const item of normalized.items) recordNormalizedItem(item, summary);
   if (normalized.metadata !== undefined) captureMetadata(normalized.metadata, summary);
-  if (normalized.result !== undefined && runResultSchema.safeParse(normalized.result).success) {
-    summary.strictResult = true;
+  if (normalized.result !== undefined && smokeResultIsStrict(normalized.result)) {
+    summary.hasStrictResult = true;
     increment(summary, 'run.completed');
   }
+}
+
+// CFG-005/006: recognize Codex `error`/`turn.failed` and Claude error-result frames as terminal
+// failures. Only a generic diagnostic code is retained; the raw message/code text is discarded.
+function captureFailureFrame(
+  provider: SmokeProvider,
+  frame: Record<string, unknown>,
+  summary: ProviderSummary,
+): void {
+  const type = typeof frame.type === 'string' ? frame.type : '';
+  let failed = false;
+  let text = '';
+  if (provider === 'openai') {
+    if (type === 'error') {
+      failed = true;
+      text = diagnosticText(frame.message);
+    } else if (type === 'turn.failed') {
+      failed = true;
+      const error = recordOf(frame.error);
+      text =
+        diagnosticText(error?.message) ||
+        diagnosticText(error?.code) ||
+        diagnosticText(frame.message);
+    }
+  } else if (type === 'error') {
+    failed = true;
+    text = diagnosticText(frame.message);
+  } else if (type === 'result') {
+    const subtype = typeof frame.subtype === 'string' ? frame.subtype : '';
+    if (frame.is_error === true || /error|fail/i.test(subtype)) {
+      failed = true;
+      const error = recordOf(frame.error);
+      text = diagnosticText(error?.message) || diagnosticText(frame.result) || subtype;
+    }
+  }
+  if (!failed) return;
+  summary.terminalFailure = true;
+  if (summary.frameDiagnostic === undefined) {
+    summary.frameDiagnostic = classifyProviderDiagnostic(text) ?? 'UNKNOWN_PROVIDER_FAILURE';
+  }
+}
+
+function recordOf(value: unknown): Record<string, unknown> | undefined {
+  return isRecord(value) ? value : undefined;
+}
+
+function diagnosticText(value: unknown): string {
+  return typeof value === 'string' ? value : '';
 }
 
 function recordNormalizedItem(item: NormalizedItem, summary: ProviderSummary): void {
@@ -892,6 +1192,7 @@ function sanitizedOutcome(evidence: ProviderSmokeEvidence): Readonly<Record<stri
     invocationCount: evidence.invocationCount,
     spawnAttemptCount: evidence.spawnAttemptCount,
     reservedCount: evidence.reservedCount,
+    ...(evidence.diagnostic === undefined ? {} : { diagnostic: evidence.diagnostic }),
   };
 }
 

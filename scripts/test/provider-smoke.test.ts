@@ -1,18 +1,28 @@
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it } from 'vitest';
 
 import {
+  ARGV_POLICY_VERSION,
   AUTHORIZATION_ID_ENV,
   CLAUDE_DISALLOWED_TOOLS,
+  CLAUDE_EMPTY_MCP_CONFIG,
   CLAUDE_MODEL_ENV,
   CLAUDE_READ_ONLY_TOOLS,
   CODEX_MODEL_ENV,
   DEFAULT_CLAUDE_SMOKE_MODEL,
+  DIAGNOSTIC_MAX_BYTES,
   PROVIDER_SMOKE_MAX_BUDGET_USD,
+  classifyProviderDiagnostic,
+  providerSmokeResultSchema,
+  smokeResultIsStrict,
   ResourceTracker,
   claudeSmokeArgv,
   codexSmokeArgv,
   computeLivePolicy,
   grantEnvelope,
+  type ProviderDiagnosticCode,
+  type ProviderSmokeEvidence,
   invokeSmokeProvider,
   isSmokePass,
   issueGrant,
@@ -136,7 +146,11 @@ class InMemoryLedger implements SmokeLedger {
   public readonly reservedCount: Record<SmokeProviderKey, number> = { openai: 0, anthropic: 0 };
   public readonly spawnCount: Record<SmokeProviderKey, number> = { openai: 0, anthropic: 0 };
   public readonly spawnMarks: Array<{ provider: SmokeProviderKey; ordinal: number }> = [];
-  public readonly outcomes: Array<{ provider: SmokeProviderKey; ordinal: number }> = [];
+  public readonly outcomes: Array<{
+    provider: SmokeProviderKey;
+    ordinal: number;
+    outcome: Readonly<Record<string, unknown>>;
+  }> = [];
   public markThrows = false;
   public constructor(private readonly storedGrant: AuthorizationGrant | undefined) {}
   public readGrant(): AuthorizationGrant | undefined {
@@ -171,8 +185,12 @@ class InMemoryLedger implements SmokeLedger {
       spawnAttempts: this.spawnCount[provider],
     };
   }
-  public recordOutcome(_id: string, reservation: Reservation): void {
-    this.outcomes.push({ provider: reservation.provider, ordinal: reservation.ordinal });
+  public recordOutcome(
+    _id: string,
+    reservation: Reservation,
+    outcome: Readonly<Record<string, unknown>>,
+  ): void {
+    this.outcomes.push({ provider: reservation.provider, ordinal: reservation.ordinal, outcome });
   }
 }
 
@@ -257,7 +275,7 @@ describe('SMG-008 argv isolation flags', () => {
       '--no-session-persistence',
       '--strict-mcp-config',
       '--mcp-config',
-      '{}',
+      CLAUDE_EMPTY_MCP_CONFIG,
       '--disable-slash-commands',
       '--max-budget-usd',
       String(PROVIDER_SMOKE_MAX_BUDGET_USD),
@@ -816,5 +834,298 @@ describe('pure helpers', () => {
     expect(withRepositoryStatus(succeeded, true).exitClassification).toBe('succeeded');
     expect(withRepositoryStatus(succeeded, false).exitClassification).toBe('repository_changed');
     expect(succeeded.spawnAttemptCount).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CORR-M2-SMOKE-CONFIG-003 (CFG-001..008)
+// ---------------------------------------------------------------------------
+function fakeProcessWith(opts: {
+  stdout?: readonly string[];
+  stderr?: readonly string[];
+  exitCode?: number;
+  onStdin?: (bytes: Uint8Array) => void;
+}): SmokeProcess {
+  return {
+    stdout: byteStream(opts.stdout ?? []),
+    stderr: byteStream(opts.stderr ?? []),
+    exited: Promise.resolve({ exitCode: opts.exitCode ?? 0, signal: null }),
+    writeStdin: (bytes) => opts.onStdin?.(bytes),
+    terminateOwnedTree: () => undefined,
+    countOwnedDescendants: () => 0,
+  };
+}
+
+function collectSchemaIssues(node: unknown, path: string, issues: string[]): void {
+  if (typeof node !== 'object' || node === null) return;
+  const schema = node as Record<string, unknown>;
+  if (schema.type === 'object') {
+    if (schema.additionalProperties !== false)
+      issues.push(`${path}: additionalProperties !== false`);
+    const props = (schema.properties ?? {}) as Record<string, unknown>;
+    const propKeys = Object.keys(props).sort();
+    const reqKeys = Array.isArray(schema.required) ? [...(schema.required as string[])].sort() : [];
+    if (JSON.stringify(propKeys) !== JSON.stringify(reqKeys))
+      issues.push(`${path}: required !== all property keys`);
+    for (const [key, value] of Object.entries(props))
+      collectSchemaIssues(value, `${path}.${key}`, issues);
+  } else if (schema.type === 'array') {
+    if (typeof schema.items !== 'object' || schema.items === null)
+      issues.push(`${path}: array missing items`);
+    else collectSchemaIssues(schema.items, `${path}.items`, issues);
+  }
+}
+
+const emptyResult = {
+  status: 'succeeded',
+  summary: '3 files; TypeScript, Markdown',
+  findings: [],
+  artifacts: [],
+  changes: [],
+  tests: [],
+  risks: [],
+  handoff: 'Read-only inspection completed.',
+};
+
+function codexInvocation() {
+  return {
+    provider: 'openai' as const,
+    executable: RESOLVED.openai,
+    argv: codexSmokeArgv(paths, 'gpt-5.1-codex'),
+    cwd: paths.repository,
+    environment: {},
+    permissionMode: 'read-only' as const,
+    executableFingerprint: FP.openai,
+  };
+}
+function claudeInvocation() {
+  return {
+    provider: 'anthropic' as const,
+    executable: RESOLVED.anthropic,
+    argv: claudeSmokeArgv(paths, 'sonnet'),
+    cwd: paths.repository,
+    environment: {},
+    permissionMode: 'dontAsk-read-only-tools' as const,
+    executableFingerprint: FP.anthropic,
+  };
+}
+const fixedNow = () => new Date('2026-07-24T00:00:00.000Z');
+
+describe('CFG-001 strict structured-output schema', () => {
+  it('every array has real items; every object has additionalProperties:false + required=all-props; no maxItems/minLength', () => {
+    const issues: string[] = [];
+    collectSchemaIssues(providerSmokeResultSchema, '$', issues);
+    expect(issues).toEqual([]);
+    const serialized = JSON.stringify(providerSmokeResultSchema);
+    expect(serialized).not.toContain('maxItems'); // Anthropic rejects array maxItems
+    expect(serialized).not.toContain('minLength');
+    expect(providerSmokeResultSchema.properties.status.enum).toEqual(['succeeded']);
+  });
+
+  it('smokeResultIsStrict passes an empty succeeded result and rejects non-empty/non-succeeded/Zod-invalid', () => {
+    expect(smokeResultIsStrict(emptyResult)).toBe(true);
+    expect(smokeResultIsStrict({ ...emptyResult, risks: ['a risk'] })).toBe(false); // Zod-valid but non-empty
+    expect(smokeResultIsStrict({ ...emptyResult, status: 'failed' })).toBe(false);
+    expect(smokeResultIsStrict({ ...emptyResult, summary: '' })).toBe(false); // Zod-invalid
+    expect(smokeResultIsStrict({ ...emptyResult, findings: [{}] })).toBe(false); // Zod-invalid element
+  });
+});
+
+describe('CFG-003 Claude empty MCP config', () => {
+  it('is exactly {"mcpServers":{}}, JSON-parses to that, and no bare {} remains in argv', () => {
+    expect(CLAUDE_EMPTY_MCP_CONFIG).toBe('{"mcpServers":{}}');
+    expect(JSON.parse(CLAUDE_EMPTY_MCP_CONFIG)).toEqual({ mcpServers: {} });
+    const claudeArgv = claudeSmokeArgv(paths, 'sonnet');
+    expect(claudeArgv).toContain('--strict-mcp-config');
+    expect(claudeArgv).toContain(CLAUDE_EMPTY_MCP_CONFIG);
+    expect(claudeArgv).not.toContain('{}');
+  });
+});
+
+describe('CFG-004 sanitized diagnostic taxonomy', () => {
+  it('maps every code with deterministic priority, bounds input, and returns UNKNOWN/undefined at the edges', () => {
+    const cases: Array<[string, ProviderDiagnosticCode]> = [
+      ['error: invalid mcp config', 'INVALID_MCP_CONFIG'],
+      ['invalid schema: additionalProperties must be false', 'INVALID_OUTPUT_SCHEMA'],
+      ['unknown option --frobnicate', 'INVALID_ARGUMENT'],
+      ['model not found: gpt-x', 'MODEL_UNAVAILABLE'],
+      ['401 unauthorized request', 'AUTHENTICATION_FAILED'],
+      ['permission denied for resource', 'PERMISSION_DENIED'],
+      ['429 too many requests', 'RATE_LIMITED'],
+      ['econnrefused while connecting', 'NETWORK_UNAVAILABLE'],
+      ['500 internal server error', 'PROVIDER_INTERNAL_ERROR'],
+      ['the weather is nice today', 'UNKNOWN_PROVIDER_FAILURE'],
+    ];
+    for (const [text, code] of cases) expect(classifyProviderDiagnostic(text)).toBe(code);
+    expect(classifyProviderDiagnostic('')).toBeUndefined();
+    expect(classifyProviderDiagnostic('   ')).toBeUndefined();
+    // precedence: MCP (rule 1) beats model (rule 4); schema (rule 2) beats rate-limit (rule 7).
+    expect(classifyProviderDiagnostic('invalid mcp config; model not found')).toBe(
+      'INVALID_MCP_CONFIG',
+    );
+    expect(classifyProviderDiagnostic('invalid schema and 429 too many requests')).toBe(
+      'INVALID_OUTPUT_SCHEMA',
+    );
+    // bounded to 16 KiB: a needle beyond the cap is not seen; a needle inside is.
+    expect(classifyProviderDiagnostic('x'.repeat(DIAGNOSTIC_MAX_BYTES) + 'permission denied')).toBe(
+      'UNKNOWN_PROVIDER_FAILURE',
+    );
+    expect(classifyProviderDiagnostic('permission denied' + 'x'.repeat(DIAGNOSTIC_MAX_BYTES))).toBe(
+      'PERMISSION_DENIED',
+    );
+  });
+});
+
+describe('CFG-005/006 terminal-failure and pre-frame handling', () => {
+  it('a Codex turn.failed after a valid result on exit 0 is NOT success and carries a diagnostic', async () => {
+    const stdout = [
+      ...codexFrames(),
+      `${JSON.stringify({ type: 'turn.failed', error: { message: 'model not found: gpt-5.6-sol' } })}\n`,
+    ];
+    const evidence = await invokeSmokeProvider(
+      codexInvocation(),
+      { spawn: () => fakeProcessWith({ stdout, exitCode: 0 }) },
+      fixedNow,
+    );
+    expect(evidence.exitClassification).not.toBe('succeeded');
+    expect(evidence.strictResult).toBe(false);
+    expect(evidence.diagnostic).toBe('MODEL_UNAVAILABLE');
+  });
+
+  it('a Claude error result blocks success and carries a diagnostic', async () => {
+    const stdout = [
+      `${JSON.stringify({ type: 'system', subtype: 'init', session_id: 's', uuid: 'u0' })}\n`,
+      `${JSON.stringify({ type: 'result', uuid: 'u1', is_error: true, error: { message: '429 too many requests' } })}\n`,
+    ];
+    const evidence = await invokeSmokeProvider(
+      claudeInvocation(),
+      { spawn: () => fakeProcessWith({ stdout, exitCode: 0 }) },
+      fixedNow,
+    );
+    expect(evidence.strictResult).toBe(false);
+    expect(evidence.diagnostic).toBe('RATE_LIMITED');
+  });
+
+  it('a Claude pre-frame nonzero exit keeps 0 events, strictResult false, a stderr diagnostic, and NO raw stderr', async () => {
+    const evidence = await invokeSmokeProvider(
+      claudeInvocation(),
+      {
+        spawn: () =>
+          fakeProcessWith({
+            stdout: [],
+            stderr: ['invalid mcp config: mcpServers is required\n'],
+            exitCode: 1,
+          }),
+      },
+      fixedNow,
+    );
+    expect(evidence.normalizedEventCounts).toEqual({});
+    expect(evidence.strictResult).toBe(false);
+    expect(evidence.exitClassification).toBe('nonzero_exit');
+    expect(evidence.diagnostic).toBe('INVALID_MCP_CONFIG');
+    const serialized = JSON.stringify(evidence);
+    expect(serialized).not.toContain('mcpServers is required');
+    expect(serialized).not.toContain('is required');
+  });
+});
+
+describe('CFG-005/RB5 per-provider argv/prompt contract', () => {
+  it('delivers a provider-neutral prompt via stdin and enforces read-only through each provider argv', async () => {
+    for (const invocation of [codexInvocation(), claudeInvocation()]) {
+      let stdin = '';
+      await invokeSmokeProvider(
+        invocation,
+        {
+          spawn: () =>
+            fakeProcessWith({
+              stdout: invocation.provider === 'openai' ? codexFrames() : claudeFrames(),
+              onStdin: (bytes) => {
+                stdin += Buffer.from(bytes).toString('utf8');
+              },
+            }),
+        },
+        fixedNow,
+      );
+      // (1) no provider-specific tool names in the shared prompt
+      expect(stdin).not.toContain('Read,Glob,Grep');
+      expect(stdin).not.toContain('--allowedTools');
+      // (2) generic read-only prohibitions present; (3) no positive write/shell affordance
+      expect(stdin.toLowerCase()).toContain('read-only');
+      expect(stdin.toLowerCase()).toContain('do not');
+    }
+    // per-provider read-only enforcement is in the argv
+    expect(codexSmokeArgv(paths, 'm')).toContain('read-only');
+    const claudeArgv = claudeSmokeArgv(paths, 'm');
+    expect(claudeArgv).toContain(CLAUDE_READ_ONLY_TOOLS);
+    expect(claudeArgv).toContain(CLAUDE_DISALLOWED_TOOLS);
+  });
+});
+
+describe('CFG-008 policy version + legacy-grant rejection', () => {
+  it('bumped ARGV_POLICY_VERSION to 3 and a generation-2 grant is unusable with zero ledger mutation', async () => {
+    expect(ARGV_POLICY_VERSION).toBe(3);
+    const sha = (value: string) => createHash('sha256').update(value).digest('hex');
+    const oldBareSchema = {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'status',
+        'summary',
+        'findings',
+        'artifacts',
+        'changes',
+        'tests',
+        'risks',
+        'handoff',
+      ],
+      properties: {
+        status: { type: 'string', enum: ['succeeded', 'failed', 'needs_attention'] },
+        summary: { type: 'string', minLength: 1 },
+        findings: { type: 'array' },
+        artifacts: { type: 'array' },
+        changes: { type: 'array' },
+        tests: { type: 'array' },
+        risks: { type: 'array' },
+        handoff: { type: 'string', minLength: 1 },
+      },
+    };
+    const oldPrompt =
+      'Inspect only this synthetic public repository without writing files or using network tools. Return a strict RunResult that states the file count and detected languages.';
+    const gen2 = {
+      argvPolicyVersion: 2,
+      schemaHash: sha(JSON.stringify(oldBareSchema)),
+      promptHash: sha(oldPrompt),
+      repositoryTemplateVersion: 1,
+    };
+    expect(gen2.argvPolicyVersion).not.toBe(livePolicy.argvPolicyVersion);
+    expect(gen2.schemaHash).not.toBe(livePolicy.schemaHash);
+    expect(gen2.promptHash).not.toBe(livePolicy.promptHash);
+
+    const oldGrant: AuthorizationGrant = { ...grant, options: { ...SMOKE_GRANT_OPTIONS, ...gen2 } };
+    const ledger = new InMemoryLedger(oldGrant);
+    const result = await runProviderSmoke(runDeps({ ledger }));
+    expect(result.providers.every((p) => p.reachedStage === 'policy_binding_mismatch')).toBe(true);
+    expect(ledger.claimed).toBe(false);
+    expect(ledger.spawnMarks).toEqual([]);
+    expect(ledger.outcomes).toEqual([]);
+    expect(ledger.reservedCount).toEqual({ openai: 0, anthropic: 0 });
+  });
+});
+
+describe('CFG-004 diagnostic persisted to the outcome ledger', () => {
+  it('persists the failed provider diagnostic in the outcome payload with no raw text', async () => {
+    const ledger = new InMemoryLedger(grant);
+    const port: SmokeProcessPort = {
+      spawn: (request) =>
+        request.argv[0] === 'exec'
+          ? fakeProcessWith({ stdout: [], stderr: ['unknown option --frobnicate\n'], exitCode: 1 })
+          : fakeProcessWith({ stdout: claudeFrames() }),
+    };
+    const result = await runProviderSmoke(runDeps({ ledger, processPort: port }));
+    const codex = result.providers.find((p) => p.provider === 'openai') as ProviderSmokeEvidence;
+    expect(codex.diagnostic).toBe('INVALID_ARGUMENT');
+    const outcome = ledger.outcomes.find((entry) => entry.provider === 'openai');
+    expect(outcome?.outcome.diagnostic).toBe('INVALID_ARGUMENT');
+    expect(JSON.stringify(ledger.outcomes)).not.toContain('frobnicate');
   });
 });
