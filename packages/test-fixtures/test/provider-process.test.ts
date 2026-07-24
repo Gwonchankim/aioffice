@@ -55,7 +55,8 @@ describe('synthetic M2 provider-process fixtures', () => {
         expect(fixture.expected.result.status).toBe('succeeded');
         expect(fixture.expected.result.summary).toContain('Synthetic');
         expect(fixture.expected.result.handoff).toContain('Synthetic');
-        expect(stdout).toContain('"result"');
+        if (fixture.provider === 'codex') expect(stdout).toContain('"type":"agent_message"');
+        else expect(stdout).toContain('"structured_output"');
       }
       if (fixture.scenario === 'utf8-korean-split') {
         expect(stdout).toContain('합성 한국어 출력');
@@ -95,7 +96,7 @@ describe('synthetic M2 provider-process fixtures', () => {
         expect(fixture.expected.usage).toEqual({
           inputTokens: 11,
           outputTokens: 7,
-          durationMs: 19,
+          cacheTokens: 5,
           reportedCost: null,
         });
       }
@@ -156,8 +157,26 @@ describe('synthetic M2 provider-process fixtures', () => {
       'synthetic-codex-session',
       '-',
     ]);
-    expect(claudeResume?.process.spawnCapture?.argv).toContain('--resume');
-    expect(claudeResume?.process.spawnCapture?.argv).toContain('synthetic-claude-session');
+    expect(claudeResume?.process.spawnCapture?.argv).toEqual([
+      '--print',
+      '--output-format',
+      'stream-json',
+      '--verbose',
+      '--json-schema',
+      '{"type":"object"}',
+      '--model',
+      'synthetic-claude-model',
+      '--effort',
+      'low',
+      '--permission-mode',
+      'dontAsk',
+      '--allowedTools',
+      'Read,Glob,Grep',
+      '--disallowedTools',
+      'Bash,Edit,Write,WebFetch,WebSearch',
+      '--resume',
+      'synthetic-claude-session',
+    ]);
   });
 
   it('M2-FIX-004 supplies negative Codex resume and no-spawn policy fixtures', () => {

@@ -14,6 +14,16 @@ import { type PortBinder, SequentialPortBinder } from './port.js';
 import { NodeRuntimeFileSystem, type RuntimeFileSystem } from './runtime.js';
 export { createLogger, type StartupLogger } from './logger.js';
 export { GitReadRunner } from './git-runner.js';
+export {
+  normalizeCodexFrame,
+  normalizeClaudeFrame,
+  composeFrameIdentity,
+  type NormalizedFrame,
+  type NormalizedItem,
+  type NormalizedUsage,
+  type NormalizedMetadata,
+  type NormalizedToolStatus,
+} from './providers/provider-frame-normalization.js';
 
 export interface StartedServer {
   readonly app: FastifyInstance;

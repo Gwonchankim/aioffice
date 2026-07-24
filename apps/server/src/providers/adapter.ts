@@ -7,6 +7,7 @@ import {
   agentRunRequestSchema,
   normalizedAdapterEventSchema,
   resumeRunRequestSchema,
+  runResultSchema,
   type AgentRunRequest,
   type AgentRuntimeAdapter,
   type NormalizedAdapterEvent,
@@ -38,11 +39,22 @@ import {
   validateProviderModel,
 } from './provider-process.js';
 import { redactProviderText, SanitizedStderrRing } from './provider-redaction.js';
+import {
+  type NormalizedFrame,
+  type NormalizedItem,
+  type NormalizedUsage,
+} from './provider-frame-normalization.js';
 
 export interface AdapterMapperContext {
   readonly provider: 'openai' | 'anthropic';
   readonly model: string;
   readonly profileVersion: number;
+  readonly now: () => number;
+}
+
+export interface ToolTimer {
+  readonly startedAt: number;
+  readonly toolName: string;
 }
 
 export interface ProviderAdapterOptions {
@@ -376,6 +388,7 @@ export abstract class BaseProviderAdapter implements AgentRuntimeAdapter {
           provider: this.provider,
           model,
           profileVersion: request.agentProfileSnapshot.version,
+          now: this.now,
         }),
       );
       let streamFailure: ApplicationError | undefined;
@@ -538,6 +551,146 @@ export function adapterEvent(
       diagnostics,
     },
   });
+}
+
+/**
+ * Shared conversion of a provider-agnostic NormalizedFrame into a single ProviderFrameMapping.
+ * Both the Codex and Claude adapters delegate here so the only per-provider logic is the pure
+ * frame normalizer. Redaction and RunResult validation are applied here; tool-duration state is
+ * mutated ONLY inside `createEvents` (i.e. after IncrementalLineParser dedup acceptance).
+ */
+export function buildProviderFrameMapping(
+  normalized: NormalizedFrame,
+  context: AdapterMapperContext,
+  toolTimers: Map<string, ToolTimer>,
+): ProviderFrameMapping {
+  if (normalized.kind === 'unknown') return unknownMapping();
+  if (normalized.kind === 'invalid') return invalidMapping(normalized.finalSchema === true);
+
+  let result: RunResult | undefined;
+  if (normalized.result !== undefined) {
+    const parsed = runResultSchema.safeParse(normalized.result);
+    if (!parsed.success) return invalidMapping(true);
+    result = parsed.data;
+  }
+
+  const sessionItem = normalized.items.find(
+    (item): item is Extract<NormalizedItem, { kind: 'session' }> => item.kind === 'session',
+  );
+  const sessionMarker =
+    sessionItem === undefined ? undefined : `${context.provider}:${sessionItem.sessionId}`;
+
+  return {
+    kind: 'recognized',
+    ...(normalized.frameIdentity === undefined ? {} : { providerEventId: normalized.frameIdentity }),
+    ...(sessionMarker === undefined ? {} : { sessionMarker }),
+    ...(result === undefined ? {} : { result }),
+    createEvents: (diagnostics) =>
+      normalized.items.flatMap((item) =>
+        buildNormalizedItemEvents(item, context, toolTimers, diagnostics),
+      ),
+  };
+}
+
+function buildNormalizedItemEvents(
+  item: NormalizedItem,
+  context: AdapterMapperContext,
+  toolTimers: Map<string, ToolTimer>,
+  diagnostics: ProviderDiagnostics,
+): readonly NormalizedAdapterEvent[] {
+  switch (item.kind) {
+    case 'session':
+      return [
+        normalizedAdapterEventSchema.parse({
+          kind: 'session',
+          sessionId: item.sessionId,
+          diagnostics,
+        }),
+        adapterEvent(
+          'run.started',
+          {
+            attempt: 1,
+            provider: context.provider,
+            model: context.model,
+            profileVersion: context.profileVersion,
+            sessionId: item.sessionId,
+          },
+          diagnostics,
+        ),
+      ];
+    case 'output':
+      return [
+        adapterEvent(
+          'run.output.delta',
+          { channel: 'summary', text: nonEmptyRedacted(item.text) },
+          diagnostics,
+          item.identity,
+        ),
+      ];
+    case 'tool.started':
+      toolTimers.set(item.toolId, { startedAt: context.now(), toolName: item.toolName });
+      return [
+        adapterEvent(
+          'run.tool.started',
+          {
+            toolName: item.toolName,
+            sanitizedInput: nonEmptyRedacted(
+              item.sanitizedInput ?? 'Provider tool input was omitted.',
+            ),
+            externalMutation: false,
+          },
+          diagnostics,
+          item.identity,
+        ),
+      ];
+    case 'tool.completed': {
+      const timer = toolTimers.get(item.toolId);
+      const durationMs = timer === undefined ? 0 : Math.max(0, context.now() - timer.startedAt);
+      const toolName = timer?.toolName ?? item.toolName;
+      toolTimers.delete(item.toolId);
+      return [
+        adapterEvent(
+          'run.tool.completed',
+          { toolName, status: item.status, durationMs },
+          diagnostics,
+          item.identity,
+        ),
+      ];
+    }
+    case 'usage': {
+      const payload = usageEventPayload(item.usage);
+      return payload === undefined
+        ? []
+        : [adapterEvent('run.usage', payload, diagnostics, item.identity)];
+    }
+    case 'retry':
+      return [
+        adapterEvent(
+          'run.retry',
+          { attempt: item.attempt, delayMs: item.delayMs, reasonCode: 'PROVIDER_THROTTLED' },
+          diagnostics,
+          item.identity,
+        ),
+      ];
+  }
+}
+
+function usageEventPayload(usage: NormalizedUsage): Record<string, number | string> | undefined {
+  const payload: Record<string, number | string> = {};
+  if (usage.inputTokens !== undefined) payload.inputTokens = usage.inputTokens;
+  if (usage.outputTokens !== undefined) payload.outputTokens = usage.outputTokens;
+  if (usage.cacheTokens !== undefined) payload.cacheTokens = usage.cacheTokens;
+  if (usage.durationMs !== undefined) payload.durationMs = usage.durationMs;
+  if (usage.reportedCost !== undefined && usage.currency !== undefined) {
+    payload.reportedCost = usage.reportedCost;
+    payload.currency = usage.currency;
+  }
+  return Object.keys(payload).length === 0 ? undefined : payload;
+}
+
+function nonEmptyRedacted(value: string): string {
+  const redacted = redactProviderText(value);
+  return redacted.length === 0 ? '[REDACTED]' : redacted;
 }
 
 export function assertSafeProviderArguments(argv: readonly string[]): void {

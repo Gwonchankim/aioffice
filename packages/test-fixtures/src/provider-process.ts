@@ -151,7 +151,7 @@ export interface FakeProcessFixture {
     readonly usage?: {
       readonly inputTokens: number;
       readonly outputTokens: number;
-      readonly durationMs: number;
+      readonly cacheTokens: number;
       readonly reportedCost: null;
     };
     readonly inspection?: {
@@ -231,45 +231,96 @@ const codexFrames = {
   started: { type: 'thread.started', thread_id: 'synthetic-codex-session' },
   output: {
     type: 'item.completed',
-    id: 'codex-output-1',
-    item: { type: 'agent_message', text: 'Synthetic Codex output.' },
+    item: { id: 'codex-output-1', type: 'agent_message', text: 'Synthetic Codex output.' },
   },
   toolStarted: {
     type: 'item.started',
-    id: 'codex-tool-1',
-    item: { type: 'command_execution', command: 'git status' },
+    item: {
+      id: 'codex-tool-1',
+      type: 'command_execution',
+      command: 'git status',
+      status: 'in_progress',
+    },
   },
   toolCompleted: {
     type: 'item.completed',
-    id: 'codex-tool-1',
-    item: { type: 'command_execution', status: 'completed', duration_ms: 12 },
+    item: { id: 'codex-tool-1', type: 'command_execution', status: 'completed' },
   },
-  usage: { type: 'turn.completed', usage: { input_tokens: 11, output_tokens: 7, duration_ms: 19 } },
+  usage: {
+    type: 'turn.completed',
+    usage: { input_tokens: 11, cached_input_tokens: 5, output_tokens: 7 },
+  },
   retry: { type: 'system.api_retry', attempt: 1, delay_ms: 30_000 },
-  unknown: { type: 'future.synthetic_signal', id: 'codex-unknown-1' },
+  unknown: { type: 'future.synthetic_signal' },
 };
 
 const claudeFrames = {
-  started: { type: 'system', subtype: 'init', session_id: 'synthetic-claude-session' },
-  output: { type: 'assistant', id: 'claude-output-1', text: 'Synthetic Claude output.' },
-  toolStarted: { type: 'tool_use', id: 'claude-tool-1', name: 'Read' },
-  toolCompleted: { type: 'tool_result', id: 'claude-tool-1', status: 'completed', duration_ms: 12 },
-  usage: { type: 'result', usage: { input_tokens: 11, output_tokens: 7, duration_ms: 19 } },
-  retry: { type: 'system', subtype: 'api_retry', attempt: 1, delay_ms: 30_000 },
-  unknown: { type: 'future.synthetic_signal', id: 'claude-unknown-1' },
+  started: {
+    type: 'system',
+    subtype: 'init',
+    session_id: 'synthetic-claude-session',
+    uuid: 'claude-system-1',
+    model: 'synthetic-claude-model',
+  },
+  output: {
+    type: 'assistant',
+    uuid: 'claude-output-1',
+    message: { id: 'msg-output-1', content: [{ type: 'text', text: 'Synthetic Claude output.' }] },
+  },
+  toolStarted: {
+    type: 'assistant',
+    uuid: 'claude-tool-start-1',
+    message: {
+      id: 'msg-tool-1',
+      content: [{ type: 'tool_use', id: 'claude-tool-1', name: 'Read', input: {} }],
+    },
+  },
+  toolCompleted: {
+    type: 'user',
+    uuid: 'claude-tool-done-1',
+    message: { content: [{ type: 'tool_result', tool_use_id: 'claude-tool-1', is_error: false }] },
+  },
+  usage: {
+    type: 'result',
+    uuid: 'claude-usage-1',
+    usage: { input_tokens: 11, output_tokens: 7, cache_read_input_tokens: 5 },
+  },
+  retry: { type: 'system', subtype: 'api_retry', uuid: 'claude-retry-1', attempt: 1, retry_delay_ms: 30_000 },
+  unknown: { type: 'future.synthetic_signal', uuid: 'claude-unknown-1' },
 };
 
-const finalFrame = (provider: FakeProvider) => ({
-  type: provider === 'codex' ? 'item.completed' : 'result',
-  id: `${provider}-final-1`,
-  result: successResult(provider),
-});
+const finalFrame = (provider: FakeProvider) =>
+  provider === 'codex'
+    ? {
+        type: 'item.completed',
+        item: {
+          id: 'codex-final-1',
+          type: 'agent_message',
+          text: JSON.stringify(successResult('codex')),
+        },
+      }
+    : {
+        type: 'result',
+        subtype: 'success',
+        uuid: 'claude-final-1',
+        structured_output: successResult('claude'),
+      };
 
-const invalidFinalFrame = (provider: FakeProvider) => ({
-  type: provider === 'codex' ? 'item.completed' : 'result',
-  id: `${provider}-invalid-final-1`,
-  result: { status: 'not-a-run-result' },
-});
+const invalidFinalFrame = (provider: FakeProvider) =>
+  provider === 'codex'
+    ? {
+        type: 'item.completed',
+        item: {
+          id: 'codex-invalid-final-1',
+          type: 'agent_message',
+          text: JSON.stringify({ status: 'not-a-run-result' }),
+        },
+      }
+    : {
+        type: 'result',
+        uuid: 'claude-invalid-final-1',
+        structured_output: { status: 'not-a-run-result' },
+      };
 
 const eventSequence = (
   ...types: readonly FixtureRunEventType[]
@@ -300,7 +351,7 @@ const successTerminal = { status: 'succeeded' } as const;
 const standardUsage = {
   inputTokens: 11,
   outputTokens: 7,
-  durationMs: 19,
+  cacheTokens: 5,
   reportedCost: null,
 } as const;
 const defaultExit = (): FakeProcessExit => ({
@@ -333,14 +384,18 @@ const providerSpawnCapture = (provider: FakeProvider, resume = false): FakeProce
           '--output-format',
           'stream-json',
           '--verbose',
+          '--json-schema',
+          '{"type":"object"}',
           '--model',
           'synthetic-claude-model',
           '--effort',
           'low',
           '--permission-mode',
           'dontAsk',
-          '--json-schema',
-          '{"type":"object"}',
+          '--allowedTools',
+          'Read,Glob,Grep',
+          '--disallowedTools',
+          'Bash,Edit,Write,WebFetch,WebSearch',
           ...(resume ? ['--resume', sessionId] : []),
         ];
 
@@ -392,11 +447,18 @@ const makeProviderFixtures = (provider: FakeProvider): readonly FakeProcessFixtu
     line(finalFrame(provider)),
   ];
   const outputFrame = line(frames.output);
-  const koreanFrame = line({
-    type: provider === 'codex' ? 'item.completed' : 'assistant',
-    id: `${provider}-korean-1`,
-    text: '합성 한국어 출력',
-  });
+  const koreanFrame = line(
+    provider === 'codex'
+      ? {
+          type: 'item.completed',
+          item: { id: `${provider}-korean-1`, type: 'agent_message', text: '합성 한국어 출력' },
+        }
+      : {
+          type: 'assistant',
+          uuid: `${provider}-korean-1`,
+          message: { id: `${provider}-korean-msg`, content: [{ type: 'text', text: '합성 한국어 출력' }] },
+        },
+  );
   const koreanMarker = encode('합');
   const koreanOffset = koreanFrame.findIndex(
     (value, index) =>
