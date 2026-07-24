@@ -8,7 +8,7 @@
 - validated product SHA: `b28683a12a50878e3e6b1d23b19db8fa7c241c92`
 - pre-smoke evidence HEAD: `9aa36a90167c209a05c5b14a228dc776bf40a296`
 - final evidence HEAD: the tip commit adding these `docs/tasks/M2-REAL-PROVIDER-SMOKE-002/` files (descendant of the validated product SHA), recorded distinctly.
-- authorizationIdHash: `1e0a7f0bccda1842a8ebc39febddf4ad8e375377fb66067a390d2a395a622f71` (raw id not recorded)
+- successful authorization authorizationIdHash: `1e0a7f0bccda1842a8ebc39febddf4ad8e375377fb66067a390d2a395a622f71` (one-way). The raw authorization label is not a credential or reusable permission and the authorization is already consumed; it was recorded in three of these documents in the initial smoke-evidence commit and is replaced with this hash in the current snapshot (Git history not rewritten) — see `evidence-reconciliation.md` (EVID-M2-SMOKE-002-001).
 
 ## Result summary
 - Codex `gpt-5.6-sol`: succeeded, strictResult true, repositoryUnchanged true, sanitizerFindingCount 0, 1 spawn.
@@ -17,7 +17,7 @@
 
 ## Preservation & isolation
 - main unchanged `38132a8` (clean); worktree tracked-clean; 0 remotes; product/dependency/lockfile/schema/prompt UNCHANGED; no external action.
-- SPENT `M2-SMOKE-20260724-001` ledger unchanged (pre==post manifest sha256); prior failure evidence and the over-invocation record preserved. New `M2-SMOKE-20260724-002` ledger preserved (grant/claim/slot/spawn/outcome intact). M3 NOT started.
+- The prior spent authorization ledger (prior spent authorization authorizationIdHash `2b0dc13e1a487fe2dbf9834bf5ef95cb5f39f7e62912ed3a6bf74df29e29a728`) is unchanged (pre==post manifest sha256); prior failure evidence and the over-invocation record preserved. The successful authorization ledger (successful authorization authorizationIdHash `1e0a7f0bccda1842a8ebc39febddf4ad8e375377fb66067a390d2a395a622f71`) is preserved (grant/claim/slot/spawn/outcome intact). M3 NOT started.
 - All real-provider env vars scoped per command; none persist.
 
 ## Evidence

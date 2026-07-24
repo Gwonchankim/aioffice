@@ -7,7 +7,7 @@
 - branch: `corr/m2-smoke-config-compatibility`
 - validated product SHA: `b28683a12a50878e3e6b1d23b19db8fa7c241c92`
 - pre-smoke evidence HEAD: `9aa36a90167c209a05c5b14a228dc776bf40a296`
-- authorizationIdHash: `1e0a7f0bccda1842a8ebc39febddf4ad8e375377fb66067a390d2a395a622f71` (one-way; raw id not recorded)
+- successful authorization authorizationIdHash: `1e0a7f0bccda1842a8ebc39febddf4ad8e375377fb66067a390d2a395a622f71` (one-way). The raw authorization label is not a credential or reusable permission and the authorization is already consumed; it was recorded in three of these documents in the initial smoke-evidence commit and is replaced with this hash in the current snapshot (Git history not rewritten) — see `evidence-reconciliation.md` (EVID-M2-SMOKE-002-001).
 - one-time authorization: exactly 1 Codex + 1 Claude (2 spawns max); retry 0 / resume 0 / fallback 0 / re-run 0.
 
 ## Grant (0 provider/model calls; sanitized)
@@ -32,13 +32,13 @@
 - childProcessCount 1 (descendant leak 0); reportedUsage `{inputTokens:6, outputTokens:651, cacheTokens:62382, durationMs:15673}`; reportedCost `0.11017535` (≤ 0.50 budget); sanitizerFindingCount **0**
 
 ## Objective invocation audit (durable ledger markers; read-only)
-- New ledger `M2-SMOKE-20260724-002`: `grant.json`, `run.claim`, `slots/` = `openai-1.slot`+`openai-1.spawn`+`openai-1.outcome.json`, `anthropic-1.slot`+`anthropic-1.spawn`+`anthropic-1.outcome.json`.
+- New authorization ledger (successful authorization authorizationIdHash `1e0a7f0bccda1842a8ebc39febddf4ad8e375377fb66067a390d2a395a622f71`): `grant.json`, `run.claim`, `slots/` = `openai-1.slot`+`openai-1.spawn`+`openai-1.outcome.json`, `anthropic-1.slot`+`anthropic-1.spawn`+`anthropic-1.outcome.json`.
 - `.spawn` markers = **2** (openai 1, anthropic 1) ⇒ objective real invocation count = **2**, ≤ authorized budget; each provider ≤1. No over-invocation. A rerun would be claim-denied (0 additional spawn).
 
 ## PASS determination
 Both providers satisfy: reservedCount 1, spawnAttemptCount 1, invocationCount 1, reachedStage `invocation_completed`, exitClassification `succeeded`, strictResult `true`, repositoryUnchanged `true`, sanitizerFindingCount 0, descendant leak 0. Common: `cleanup: complete`, new ledger preserved, spent ledger unchanged, main/worktree unchanged, 0 raw secret / raw stderr in evidence. ⇒ **PASS**. (Not a repository-mutation/security_halt case; both providers ran and left the synthetic repo unchanged.)
 
 ## Isolation / preservation
-main unchanged `38132a818…` (clean); M2 `d365696…`; correction branches/worktrees preserved; 0 remotes; product code + dependencies + lockfile UNCHANGED; no push/PR/merge/deploy/external action. The SPENT `M2-SMOKE-20260724-001` ledger is unchanged (pre==post manifest sha256 `d0a8cb1a3d456da59717de96d7ee6703f02dbcf6f70261aca4cb9cd210e265df`; 8 files; 2 `.spawn` markers); prior failure evidence and the over-invocation record are preserved. M3 NOT started. All real-provider env vars were scoped per command and are empty after (`env | grep ORION_` ⇒ NONE).
+main unchanged `38132a818…` (clean); M2 `d365696…`; correction branches/worktrees preserved; 0 remotes; product code + dependencies + lockfile UNCHANGED; no push/PR/merge/deploy/external action. The prior spent authorization ledger (prior spent authorization authorizationIdHash `2b0dc13e1a487fe2dbf9834bf5ef95cb5f39f7e62912ed3a6bf74df29e29a728`) is unchanged (pre==post manifest sha256 `d0a8cb1a3d456da59717de96d7ee6703f02dbcf6f70261aca4cb9cd210e265df`; 8 files; 2 `.spawn` markers); prior failure evidence and the over-invocation record are preserved. M3 NOT started. All real-provider env vars were scoped per command and are empty after (`env | grep ORION_` ⇒ NONE).
 
 ## Verdict: PASS — ready for integration review. main integration is a SEPARATE explicit user decision and was NOT performed. No recall.
