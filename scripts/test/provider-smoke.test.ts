@@ -16,6 +16,9 @@ import {
   invokeSmokeProvider,
   isSmokePass,
   issueGrant,
+  pendingEvidence,
+  resolveLedgerDirectory,
+  withRepositoryStatus,
   runDeferredProviderSmoke,
   runProviderSmoke,
   runSmokeCli,
@@ -28,11 +31,9 @@ import {
   type ProviderSmokeEnvelope,
   type ProviderSmokePaths,
   type RunProviderSmokeDeps,
-  type SmokeCliDeps,
   type SmokeLedger,
   type SmokeProcess,
   type SmokeProcessPort,
-  type SmokeProvider,
   type SmokeRepository,
 } from '../provider-smoke.js';
 import {
@@ -777,5 +778,43 @@ describe('invokeSmokeProvider inspection (shared normalizer)', () => {
       cliVersion: '0.145.0',
       normalizedEventCounts: { 'run.started': 1, 'run.usage': 1, 'run.completed': 1 },
     });
+  });
+});
+
+describe('pure helpers', () => {
+  it('computeLivePolicy is deterministic and matches the grant options', () => {
+    expect(computeLivePolicy()).toEqual(livePolicy);
+    expect(computeLivePolicy().argvPolicyVersion).toBe(grant.options.argvPolicyVersion);
+    expect(computeLivePolicy().schemaHash).toBe(grant.options.schemaHash);
+  });
+
+  it('grantEnvelope emits a hashed id, bindings, and policy but no raw id/path', () => {
+    const envelope = grantEnvelope(grant, 'granted');
+    expect(envelope).toMatchObject({ schemaVersion: 1, mode: 'grant', result: 'granted' });
+    expect(envelope.authorizationIdHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(envelope.providers?.openai.binding.executableFingerprint).toBe(FP.openai);
+    expect(envelope.policy).toEqual(livePolicy);
+    expect(JSON.stringify(envelope)).not.toContain('AUTH-1');
+  });
+
+  it('resolveLedgerDirectory honors an override or the LOCALAPPDATA default', () => {
+    expect(resolveLedgerDirectory({ ORION_PROVIDER_LEDGER_DIR: 'D:\\ledger' })).toBe('D:\\ledger');
+    expect(resolveLedgerDirectory({ LOCALAPPDATA: 'C:\\Users\\x\\AppData\\Local' })).toBe(
+      'C:\\Users\\x\\AppData\\Local\\Orion\\provider-smoke-ledger',
+    );
+  });
+
+  it('withRepositoryStatus flags a mutation and pendingEvidence carries the counts', () => {
+    const succeeded = {
+      ...pendingEvidence('openai', 'invocation_completed', {
+        reservedCount: 1,
+        spawnAttemptCount: 1,
+        invocationCount: 1,
+      }),
+      exitClassification: 'succeeded' as const,
+    };
+    expect(withRepositoryStatus(succeeded, true).exitClassification).toBe('succeeded');
+    expect(withRepositoryStatus(succeeded, false).exitClassification).toBe('repository_changed');
+    expect(succeeded.spawnAttemptCount).toBe(1);
   });
 });
