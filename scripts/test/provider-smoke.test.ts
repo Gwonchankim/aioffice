@@ -1,79 +1,142 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  AUTHORIZATION_ID_ENV,
   CLAUDE_DISALLOWED_TOOLS,
+  CLAUDE_MODEL_ENV,
   CLAUDE_READ_ONLY_TOOLS,
+  CODEX_MODEL_ENV,
   DEFAULT_CLAUDE_SMOKE_MODEL,
   PROVIDER_SMOKE_MAX_BUDGET_USD,
-  PROVIDER_SMOKE_TIMEOUT_MS,
-  PROVIDER_SMOKE_CLEANUP_MAX_RETRIES,
-  PROVIDER_SMOKE_CLEANUP_RETRY_DELAY_MS,
+  ResourceTracker,
   claudeSmokeArgv,
   codexSmokeArgv,
+  computeLivePolicy,
+  grantEnvelope,
   invokeSmokeProvider,
-  issueGrant,
-  pendingEvidence,
-  resolveLedgerDirectory,
-  withRepositoryStatus,
   isSmokePass,
-  providerSmokeResultSchema,
-  requiresRealProviderTestOptIn,
+  issueGrant,
+  runDeferredProviderSmoke,
   runProviderSmoke,
-  runProviderSmokeWithBestEffortCleanup,
-  sameSnapshot,
-  AUTHORIZATION_ID_ENV,
-  CODEX_MODEL_ENV,
-  LEDGER_DIR_ENV,
+  runSmokeCli,
+  type DeferredSmokeDependencies,
+  type GrantEnvelope,
   type GrantIssuer,
-  type ProviderSmokeDirectoryRemover,
+  type HardenedRuntime,
+  type ProbeResult,
+  type ProviderBindingProbe,
+  type ProviderSmokeEnvelope,
   type ProviderSmokePaths,
+  type RunProviderSmokeDeps,
+  type SmokeCliDeps,
   type SmokeLedger,
+  type SmokeProcess,
   type SmokeProcessPort,
   type SmokeProvider,
   type SmokeRepository,
 } from '../provider-smoke.js';
 import {
+  ProviderLedgerError,
   SMOKE_GRANT_OPTIONS,
   type AuthorizationGrant,
+  type GrantRequest,
+  type ProviderBinding,
   type Reservation,
   type SmokeProviderKey,
 } from '../provider-authorization-ledger.js';
 
+const livePolicy = computeLivePolicy();
+const FP: Record<SmokeProviderKey, string> = { openai: 'a'.repeat(64), anthropic: 'b'.repeat(64) };
+const BASENAME: Record<SmokeProviderKey, string> = { openai: 'codex.exe', anthropic: 'claude.exe' };
+const CLI: Record<SmokeProviderKey, string> = { openai: '0.145.0', anthropic: '2.1.156' };
+const RESOLVED: Record<SmokeProviderKey, string> = {
+  openai: 'C:\\trusted\\codex.exe',
+  anthropic: 'C:\\trusted\\claude.exe',
+};
+
+function binding(provider: SmokeProviderKey, model: string): ProviderBinding {
+  return {
+    provider,
+    model,
+    executableBasename: BASENAME[provider],
+    executableFingerprint: FP[provider],
+    cliVersion: CLI[provider],
+  };
+}
+
+const grant: AuthorizationGrant = {
+  schemaVersion: 2,
+  authorizationId: 'AUTH-1',
+  createdAt: '2026-07-24T00:00:00.000Z',
+  providers: {
+    openai: {
+      model: 'gpt-5.1-codex',
+      maxInvocations: 1,
+      binding: binding('openai', 'gpt-5.1-codex'),
+    },
+    anthropic: { model: 'sonnet', maxInvocations: 1, binding: binding('anthropic', 'sonnet') },
+  },
+  options: { ...SMOKE_GRANT_OPTIONS, ...livePolicy },
+};
+
 const paths: ProviderSmokePaths = {
   repository: 'C:\\synthetic-public-repository',
   schemaPath: 'C:\\runtime\\result-schema.json',
-  schemaSerialized: '{"type":"object","additionalProperties":false}',
+  schemaSerialized: '{"type":"object"}',
 };
-
-const codexModel = 'gpt-5.1-codex';
-const claudeModel = 'sonnet';
 
 const validResult = {
   status: 'succeeded',
-  summary: 'Synthetic repository contains two files.',
+  summary: 'Synthetic result.',
   findings: [],
   artifacts: [],
   changes: [],
   tests: [],
   risks: [],
-  handoff: 'No follow-up is required.',
+  handoff: 'Done.',
 };
 
-const grant: AuthorizationGrant = {
-  schemaVersion: 1,
-  authorizationId: 'AUTH-1',
-  createdAt: '2026-07-24T00:00:00.000Z',
-  providers: {
-    openai: { model: codexModel, maxInvocations: 1 },
-    anthropic: { model: claudeModel, maxInvocations: 1 },
-  },
-  options: SMOKE_GRANT_OPTIONS,
+function codexFrames(): readonly string[] {
+  return [
+    `${JSON.stringify({ type: 'thread.started', thread_id: 'codex-session', version: '0.145.0' })}\n`,
+    `${JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 3, cached_input_tokens: 1, output_tokens: 2 } })}\n`,
+    `${JSON.stringify({ type: 'item.completed', item: { id: 'final', type: 'agent_message', text: JSON.stringify(validResult) } })}\n`,
+  ];
+}
+
+function claudeFrames(): readonly string[] {
+  return [
+    `${JSON.stringify({ type: 'system', subtype: 'init', session_id: 'claude-session', uuid: 'u0', model: 'sonnet' })}\n`,
+    `${JSON.stringify({ type: 'result', uuid: 'u3', usage: { input_tokens: 3, output_tokens: 2 }, structured_output: validResult })}\n`,
+  ];
+}
+
+async function* byteStream(chunks: readonly string[]): AsyncIterable<Uint8Array> {
+  for (const chunk of chunks) yield Buffer.from(chunk, 'utf8');
+}
+
+function fakeProcess(stdout: readonly string[], exitCode = 0): SmokeProcess {
+  return {
+    stdout: byteStream(stdout),
+    stderr: byteStream([]),
+    exited: Promise.resolve({ exitCode, signal: null }),
+    writeStdin: () => undefined,
+    terminateOwnedTree: () => undefined,
+    countOwnedDescendants: () => 0,
+  };
+}
+
+const successPort: SmokeProcessPort = {
+  spawn: (request) => fakeProcess(request.argv[0] === 'exec' ? codexFrames() : claudeFrames()),
 };
 
 class InMemoryLedger implements SmokeLedger {
   public claimed = false;
-  public readonly used: Record<SmokeProviderKey, number> = { openai: 0, anthropic: 0 };
+  public readonly reservedCount: Record<SmokeProviderKey, number> = { openai: 0, anthropic: 0 };
+  public readonly spawnCount: Record<SmokeProviderKey, number> = { openai: 0, anthropic: 0 };
+  public readonly spawnMarks: Array<{ provider: SmokeProviderKey; ordinal: number }> = [];
   public readonly outcomes: Array<{ provider: SmokeProviderKey; ordinal: number }> = [];
+  public markThrows = false;
   public constructor(private readonly storedGrant: AuthorizationGrant | undefined) {}
   public readGrant(): AuthorizationGrant | undefined {
     return this.storedGrant;
@@ -83,88 +146,79 @@ class InMemoryLedger implements SmokeLedger {
     this.claimed = true;
     return true;
   }
-  public reserve(_authorizationId: string, provider: SmokeProviderKey): Reservation | null {
-    if (this.used[provider] >= 1) return null;
-    this.used[provider] += 1;
-    return { provider, ordinal: this.used[provider] };
+  public reserve(_id: string, provider: SmokeProviderKey): Reservation | null {
+    if (this.reservedCount[provider] >= 1) return null;
+    this.reservedCount[provider] += 1;
+    return { provider, ordinal: 1 };
+  }
+  public markSpawnAttempt(_id: string, provider: SmokeProviderKey, ordinal: number): void {
+    if (this.markThrows) throw new Error('mark failed');
+    this.spawnCount[provider] += 1;
+    this.spawnMarks.push({ provider, ordinal });
   }
   public usage(
-    _authorizationId: string,
+    _id: string,
     provider: SmokeProviderKey,
-  ): { granted: number; used: number } {
-    return { granted: 1, used: this.used[provider] };
+  ): {
+    granted: number;
+    reserved: number;
+    spawnAttempts: number;
+  } {
+    return {
+      granted: 1,
+      reserved: this.reservedCount[provider],
+      spawnAttempts: this.spawnCount[provider],
+    };
   }
-  public recordOutcome(_authorizationId: string, reservation: Reservation): void {
+  public recordOutcome(_id: string, reservation: Reservation): void {
     this.outcomes.push({ provider: reservation.provider, ordinal: reservation.ordinal });
   }
 }
 
-function codexSuccessFrames(): readonly string[] {
-  return [
-    `${JSON.stringify({ type: 'thread.started', thread_id: 'codex-session', version: '0.145.0' })}\n`,
-    `${JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 3, cached_input_tokens: 1, output_tokens: 2 } })}\n`,
-    `${JSON.stringify({ type: 'item.completed', item: { id: 'final', type: 'agent_message', text: JSON.stringify(validResult) } })}\n`,
-  ];
-}
-
-function claudeSuccessFrames(): readonly string[] {
-  return [
-    `${JSON.stringify({ type: 'system', subtype: 'init', session_id: 'claude-session', uuid: 'u0', model: 'sonnet' })}\n`,
-    `${JSON.stringify({
-      type: 'assistant',
-      uuid: 'u1',
-      message: {
-        id: 'm1',
-        content: [
-          { type: 'text', text: 'hi' },
-          { type: 'tool_use', id: 't1', name: 'Read', input: {} },
-        ],
-      },
-    })}\n`,
-    `${JSON.stringify({ type: 'user', uuid: 'u2', message: { content: [{ type: 'tool_result', tool_use_id: 't1', is_error: false }] } })}\n`,
-    `${JSON.stringify({ type: 'result', uuid: 'u3', usage: { input_tokens: 3, output_tokens: 2, cache_read_input_tokens: 1 }, total_cost_usd: 0.5, structured_output: validResult })}\n`,
-  ];
-}
-
-async function* byteStream(chunks: readonly string[]): AsyncIterable<Uint8Array> {
-  for (const chunk of chunks) yield Buffer.from(chunk, 'utf8');
-}
-
-function fakeProcess(stdout: readonly string[], stderr: readonly string[] = [], exitCode = 0) {
+function fakeProbe(
+  overrides: Partial<Record<SmokeProviderKey, Partial<ProbeResult> | 'throw'>> = {},
+): ProviderBindingProbe {
   return {
-    stdout: byteStream(stdout),
-    stderr: byteStream(stderr),
-    exited: Promise.resolve({ exitCode, signal: null }),
-    writeStdin: () => undefined,
-    terminateOwnedTree: () => undefined,
-    countOwnedDescendants: () => 0,
+    probe(provider) {
+      const override = overrides[provider];
+      if (override === 'throw') throw new Error('resolve failed');
+      return {
+        resolvedPath: RESOLVED[provider],
+        executableBasename: BASENAME[provider],
+        executableFingerprint: FP[provider],
+        cliVersion: CLI[provider],
+        ...override,
+      };
+    },
   };
 }
 
-const successPort: SmokeProcessPort = {
-  spawn: (request) =>
-    fakeProcess(request.argv[0] === 'exec' ? codexSuccessFrames() : claudeSuccessFrames()),
-};
-
-function fakeRepository(): SmokeRepository {
+function fakeRepository(isUnchanged: () => boolean = () => true): SmokeRepository {
   return {
     paths,
-    isUnchangedSince: () => true,
+    isUnchangedSince: isUnchanged,
     environmentFor: () => ({}),
-    executableFor: (provider: SmokeProvider) =>
-      provider === 'openai' ? 'C:\\trusted\\codex.exe' : 'C:\\trusted\\claude.exe',
   };
 }
 
-describe('deferred provider smoke contract', () => {
-  it('passes a schema FILE path to Codex and a serialized schema STRING to Claude', () => {
-    expect(requiresRealProviderTestOptIn({})).toBe(false);
-    expect(requiresRealProviderTestOptIn({ ORION_REAL_PROVIDER_TESTS: '1' })).toBe(true);
-    expect(PROVIDER_SMOKE_TIMEOUT_MS).toBe(300_000);
-    expect(DEFAULT_CLAUDE_SMOKE_MODEL).toBe('sonnet');
+function runDeps(overrides: Partial<RunProviderSmokeDeps> = {}): RunProviderSmokeDeps {
+  return {
+    authorizationId: 'AUTH-1',
+    ledger: new InMemoryLedger(grant),
+    processPort: successPort,
+    prepareRepository: async () => fakeRepository(),
+    probe: fakeProbe(),
+    environment: {},
+    cleanup: async () => 'complete',
+    livePolicy,
+    ...overrides,
+  };
+}
 
-    const codexArgv = codexSmokeArgv(paths, codexModel);
-    expect(codexArgv).toEqual([
+describe('SMG-008 argv isolation flags', () => {
+  it('adds only installed-CLI-supported flags and never --max-turns', () => {
+    const codex = codexSmokeArgv(paths, 'gpt-5.1-codex');
+    expect(codex).toEqual([
       'exec',
       '--json',
       '--sandbox',
@@ -174,16 +228,14 @@ describe('deferred provider smoke contract', () => {
       '--output-schema',
       paths.schemaPath,
       '--model',
-      codexModel,
+      'gpt-5.1-codex',
+      '--ephemeral',
+      '--ignore-user-config',
+      '--ignore-rules',
       '-',
     ]);
-
-    const claudeArgv = claudeSmokeArgv(paths, claudeModel);
-    // The Claude schema argument is the serialized JSON string, NOT the schema file path.
-    const schemaIndex = claudeArgv.indexOf('--json-schema');
-    expect(claudeArgv[schemaIndex + 1]).toBe(paths.schemaSerialized);
-    expect(claudeArgv).not.toContain(paths.schemaPath);
-    expect(claudeArgv).toEqual([
+    const claude = claudeSmokeArgv(paths, 'sonnet');
+    expect(claude).toEqual([
       '--print',
       '--output-format',
       'stream-json',
@@ -191,7 +243,7 @@ describe('deferred provider smoke contract', () => {
       '--json-schema',
       paths.schemaSerialized,
       '--model',
-      claudeModel,
+      'sonnet',
       '--effort',
       'low',
       '--permission-mode',
@@ -200,275 +252,530 @@ describe('deferred provider smoke contract', () => {
       CLAUDE_READ_ONLY_TOOLS,
       '--disallowedTools',
       CLAUDE_DISALLOWED_TOOLS,
+      '--no-chrome',
+      '--no-session-persistence',
+      '--strict-mcp-config',
+      '--mcp-config',
+      '{}',
+      '--disable-slash-commands',
       '--max-budget-usd',
       String(PROVIDER_SMOKE_MAX_BUDGET_USD),
     ]);
+    expect(claude).not.toContain('--max-turns');
+    expect(JSON.stringify(codex)).not.toMatch(/dangerously|skip-git-repo-check|fallback/i);
+    expect(JSON.stringify(claude)).not.toMatch(/dangerously|bypassPermissions|fallback/i);
+  });
+});
 
-    expect(JSON.stringify(codexArgv)).not.toMatch(/dangerously|skip-git-repo-check|fallback/i);
-    expect(JSON.stringify(claudeArgv)).not.toMatch(/dangerously|bypassPermissions|fallback/i);
-    expect(providerSmokeResultSchema).toMatchObject({
-      additionalProperties: false,
-      required: expect.arrayContaining(['status', 'findings', 'handoff']),
-    });
+describe('SMG-001 grant-model binding', () => {
+  it('argv uses the grant model regardless of run-time env (absent/equal)', async () => {
+    for (const environment of [
+      {},
+      { [CODEX_MODEL_ENV]: 'gpt-5.1-codex', [CLAUDE_MODEL_ENV]: 'sonnet' },
+    ]) {
+      const argv: string[][] = [];
+      const port: SmokeProcessPort = {
+        spawn: (r) => {
+          argv.push([...r.argv]);
+          return fakeProcess(r.argv[0] === 'exec' ? codexFrames() : claudeFrames());
+        },
+      };
+      const result = await runProviderSmoke(
+        runDeps({ environment, processPort: port, ledger: new InMemoryLedger(grant) }),
+      );
+      expect(result.providers.map((p) => p.reachedStage)).toEqual([
+        'invocation_completed',
+        'invocation_completed',
+      ]);
+      expect(argv[0]).toContain('gpt-5.1-codex');
+      expect(argv[1]).toContain('sonnet');
+    }
+  });
 
-    const snapshot = {
-      defaultBranch: 'main',
-      currentBranch: 'main',
-      headSha: 'a'.repeat(40),
-      dirty: false,
-      indexHash: 'index',
-      trackedHash: 'tracked',
-      untrackedHash: 'untracked',
-      filesHash: 'files',
+  it('rejects a differing run-time model env with MODEL_BINDING_CONFLICT and 0 spawn', async () => {
+    let spawned = 0;
+    const port: SmokeProcessPort = {
+      spawn: () => {
+        spawned += 1;
+        return fakeProcess(codexFrames());
+      },
     };
-    expect(sameSnapshot(snapshot, { ...snapshot })).toBe(true);
-    expect(sameSnapshot(snapshot, { ...snapshot, filesHash: 'changed' })).toBe(false);
-  });
-
-  it('normalizes synthetic Codex stream evidence through the shared normalizer', async () => {
-    const times = [new Date('2026-07-24T00:00:00.000Z'), new Date('2026-07-24T00:00:00.008Z')];
-    const evidence = await invokeSmokeProvider(
-      {
-        provider: 'openai',
-        executable: 'C:\\trusted\\codex.exe',
-        argv: codexSmokeArgv(paths, codexModel),
-        cwd: paths.repository,
-        environment: {},
-        permissionMode: 'read-only',
-        invocationCount: 1,
-      },
-      { spawn: () => fakeProcess(codexSuccessFrames(), ['Bearer sk-not-emitted-token\n']) },
-      () => times.shift() as Date,
+    const result = await runProviderSmoke(
+      runDeps({ environment: { [CODEX_MODEL_ENV]: 'a-different-model' }, processPort: port }),
     );
-
-    expect(evidence).toMatchObject({
-      provider: 'openai',
-      reachedStage: 'invocation_completed',
-      invocationCount: 1,
-      cliVersion: '0.145.0',
-      exitClassification: 'succeeded',
-      strictResult: true,
-      repositoryUnchanged: true,
-      childProcessCount: 1,
-      normalizedEventCounts: { 'run.started': 1, 'run.usage': 1, 'run.completed': 1 },
-      reportedUsage: { inputTokens: 3, outputTokens: 2, cacheTokens: 1 },
-    });
-    expect(evidence.sessionIdHash).toMatch(/^[a-f0-9]{64}$/);
-    expect(evidence.sanitizerFindingCount).toBeGreaterThan(0);
-  });
-
-  it('normalizes synthetic Claude stream evidence including structured_output and cost', async () => {
-    const evidence = await invokeSmokeProvider(
-      {
-        provider: 'anthropic',
-        executable: 'C:\\trusted\\claude.exe',
-        argv: claudeSmokeArgv(paths, claudeModel),
-        cwd: paths.repository,
-        environment: {},
-        permissionMode: 'dontAsk-read-only-tools',
-        invocationCount: 1,
-      },
-      { spawn: () => fakeProcess(claudeSuccessFrames(), [], 0) },
-      () => new Date('2026-07-24T00:00:00.000Z'),
-    );
-
-    expect(evidence).toMatchObject({
-      provider: 'anthropic',
-      reachedStage: 'invocation_completed',
-      exitClassification: 'succeeded',
-      strictResult: true,
-      modelReported: 'sonnet',
-      reportedCost: 0.5,
-      reportedUsage: { inputTokens: 3, outputTokens: 2, cacheTokens: 1 },
-      normalizedEventCounts: {
-        'run.started': 1,
-        'run.output.delta': 1,
-        'run.tool.started': 1,
-        'run.tool.completed': 1,
-        'run.usage': 1,
-        'run.completed': 1,
-      },
-    });
-  });
-
-  it('classifies a spawn failure as reserved-but-not-spawned without an OS child process', async () => {
-    const evidence = await invokeSmokeProvider(
-      {
-        provider: 'anthropic',
-        executable: 'C:\\trusted\\claude.exe',
-        argv: claudeSmokeArgv(paths, claudeModel),
-        cwd: paths.repository,
-        environment: {},
-        permissionMode: 'dontAsk-read-only-tools',
-        invocationCount: 1,
-      },
-      { spawn: () => Promise.reject(new Error('synthetic failure')) },
-      () => new Date('2026-07-24T00:00:00.000Z'),
-    );
-    expect(evidence).toMatchObject({
-      reachedStage: 'invocation_reserved',
-      exitClassification: 'spawn_failed',
-      childProcessCount: 0,
-      strictResult: false,
-      reportedUsage: null,
-    });
-  });
-
-  it('emits one envelope with reachedStage authorization_missing and zero count (never [])', async () => {
-    const result = await runProviderSmoke({
-      authorizationId: undefined,
-      ledger: new InMemoryLedger(grant),
-      processPort: successPort,
-      prepareRepository: async () => fakeRepository(),
-      models: { openai: codexModel, anthropic: claudeModel },
-    });
-    expect(result.schemaVersion).toBe(1);
-    expect(result.providers).toHaveLength(2);
-    expect(result.providers.map((p) => p.reachedStage)).toEqual([
-      'authorization_missing',
-      'authorization_missing',
-    ]);
-    expect(result.providers.every((p) => p.invocationCount === 0)).toBe(true);
+    expect(spawned).toBe(0);
+    expect(result.providers.every((p) => p.reachedStage === 'model_binding_conflict')).toBe(true);
+    expect(result.providers.every((p) => p.errorCode === 'MODEL_BINDING_CONFLICT')).toBe(true);
     expect(isSmokePass(result)).toBe(false);
   });
+});
 
-  it('reports grant_missing and a fail-closed ledger_unsafe without spawning', async () => {
-    const missing = await runProviderSmoke({
-      authorizationId: 'AUTH-1',
-      ledger: new InMemoryLedger(undefined),
-      processPort: successPort,
-      prepareRepository: async () => {
-        throw new Error('must not prepare repository when the grant is missing');
+describe('SMG-002 executable binding + policy binding', () => {
+  it('mismatched executable fingerprint gives 0 spawn and executable_binding_mismatch', async () => {
+    let spawned = 0;
+    const port: SmokeProcessPort = {
+      spawn: () => {
+        spawned += 1;
+        return fakeProcess(codexFrames());
       },
-      models: { openai: codexModel, anthropic: claudeModel },
-    });
-    expect(missing.providers.map((p) => p.reachedStage)).toEqual([
-      'grant_missing',
-      'grant_missing',
-    ]);
-
-    const unsafe = await runProviderSmoke({
-      authorizationId: 'AUTH-1',
-      ledger: () => {
-        throw Object.assign(new Error('unsafe'), { code: 'PROVIDER_LEDGER_PATH_UNSAFE' });
-      },
-      processPort: successPort,
-      prepareRepository: async () => fakeRepository(),
-      models: { openai: codexModel, anthropic: claudeModel },
-    });
-    expect(unsafe.providers.every((p) => p.reachedStage === 'ledger_unsafe')).toBe(true);
+    };
+    const result = await runProviderSmoke(
+      runDeps({
+        processPort: port,
+        probe: fakeProbe({ openai: { executableFingerprint: 'f'.repeat(64) } }),
+      }),
+    );
+    expect(spawned).toBe(1); // only Claude (Codex mismatch blocks Codex)
+    const codex = result.providers.find((p) => p.provider === 'openai');
+    expect(codex?.reachedStage).toBe('executable_binding_mismatch');
+    expect(codex?.errorCode).toBe('EXECUTABLE_BINDING_MISMATCH');
+    expect(codex?.spawnAttemptCount).toBe(0);
   });
 
-  it('reserves both providers, spawns each once, and reports a real cumulative count', async () => {
+  it('rechecks each executable just before its own spawn (swap between providers)', async () => {
+    // Codex matches, Claude fingerprint is swapped between the two sequential rechecks.
+    const result = await runProviderSmoke(
+      runDeps({ probe: fakeProbe({ anthropic: { executableFingerprint: 'f'.repeat(64) } }) }),
+    );
+    const codex = result.providers.find((p) => p.provider === 'openai');
+    const claude = result.providers.find((p) => p.provider === 'anthropic');
+    expect(codex?.reachedStage).toBe('invocation_completed');
+    expect(claude?.reachedStage).toBe('executable_binding_mismatch');
+    expect(claude?.spawnAttemptCount).toBe(0);
+  });
+
+  it('a policy projection mismatch (schema/prompt/version drift) gives 0 spawn', async () => {
+    let spawned = 0;
+    const port: SmokeProcessPort = {
+      spawn: () => {
+        spawned += 1;
+        return fakeProcess(codexFrames());
+      },
+    };
+    const result = await runProviderSmoke(
+      runDeps({ processPort: port, livePolicy: { ...livePolicy, schemaHash: '0'.repeat(64) } }),
+    );
+    expect(spawned).toBe(0);
+    expect(result.providers.every((p) => p.reachedStage === 'policy_binding_mismatch')).toBe(true);
+    expect(result.providers.every((p) => p.errorCode === 'POLICY_BINDING_MISMATCH')).toBe(true);
+  });
+});
+
+describe('SMG-004 every path returns the single envelope', () => {
+  it('authorization_missing / grant_missing / ledger_unsafe / grant_corrupt / preflight all yield the envelope', async () => {
+    const stages: Array<[Partial<RunProviderSmokeDeps>, string]> = [
+      [{ authorizationId: undefined }, 'authorization_missing'],
+      [{ ledger: new InMemoryLedger(undefined) }, 'grant_missing'],
+      [
+        {
+          ledger: () => {
+            throw Object.assign(new Error('unsafe'), { code: 'PROVIDER_LEDGER_PATH_UNSAFE' });
+          },
+        },
+        'ledger_unsafe',
+      ],
+      [
+        {
+          ledger: {
+            readGrant() {
+              throw Object.assign(new Error('corrupt'), { code: 'PROVIDER_GRANT_CORRUPT' });
+            },
+          } as unknown as SmokeLedger,
+        },
+        'grant_corrupt',
+      ],
+      [
+        {
+          prepareRepository: async () => {
+            throw new Error('prepare failed');
+          },
+        },
+        'preflight_unavailable',
+      ],
+      [{ probe: fakeProbe({ openai: 'throw', anthropic: 'throw' }) }, 'preflight_unavailable'],
+    ];
+    for (const [override, stage] of stages) {
+      const result = await runProviderSmoke(runDeps(override));
+      expect(result.schemaVersion).toBe(1);
+      expect(result.providers).toHaveLength(2);
+      expect(Array.isArray(result.providers)).toBe(true);
+      expect(result.providers.some((p) => p.reachedStage === stage)).toBe(true);
+      expect(isSmokePass(result)).toBe(false);
+    }
+  });
+
+  it('preserves already-produced provider evidence when a later step fails', async () => {
+    // Codex completes; the snapshot check for the halt then throws -> Claude halts, Codex retained.
+    let calls = 0;
+    const repo = fakeRepository(() => {
+      calls += 1;
+      if (calls === 1) throw new Error('snapshot failed');
+      return true;
+    });
+    const result = await runProviderSmoke(runDeps({ prepareRepository: async () => repo }));
+    const codex = result.providers.find((p) => p.provider === 'openai');
+    const claude = result.providers.find((p) => p.provider === 'anthropic');
+    expect(codex?.reachedStage).toBe('invocation_completed');
+    expect(codex?.repositoryUnchanged).toBe(false); // fail-closed unknown snapshot
+    expect(codex?.exitClassification).toBe('repository_changed');
+    expect(claude?.reachedStage).toBe('security_halt');
+  });
+});
+
+describe('SMG-005 + RB9 cleanup', () => {
+  it('cleanup runs and its incompleteness makes the run a non-pass while preserving evidence', async () => {
+    let cleaned = 0;
+    const result = await runProviderSmoke(
+      runDeps({
+        cleanup: async () => {
+          cleaned += 1;
+          return 'incomplete';
+        },
+      }),
+    );
+    expect(cleaned).toBe(1);
+    expect(result.cleanup).toBe('incomplete');
+    expect(result.providers.every((p) => p.reachedStage === 'invocation_completed')).toBe(true);
+    expect(isSmokePass(result)).toBe(false); // cleanup incomplete => not a pass
+  });
+
+  it('ResourceTracker removes only tracked dirs, bounded, and reports incomplete on EBUSY', async () => {
+    const removed: string[] = [];
+    const tracker = new ResourceTracker(async (path) => {
+      removed.push(path.toString());
+      if (path.toString() === 'C:\\temp\\repo')
+        throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+    });
+    tracker.track('C:\\temp\\runtime');
+    tracker.track('C:\\temp\\repo');
+    tracker.track('C:\\temp\\runtime'); // dedup
+    expect(await tracker.cleanup()).toBe('incomplete');
+    expect(removed).toEqual(['C:\\temp\\runtime', 'C:\\temp\\repo']);
+    expect(await new ResourceTracker(async () => undefined).cleanup()).toBe('complete');
+  });
+});
+
+describe('SMG-006 repository-mutation halt', () => {
+  it('a Codex repository mutation halts Claude with 0 spawn (reserved, security_halt)', async () => {
+    const ledger = new InMemoryLedger(grant);
+    let spawned = 0;
+    const port: SmokeProcessPort = {
+      spawn: (r) => {
+        spawned += 1;
+        return fakeProcess(r.argv[0] === 'exec' ? codexFrames() : claudeFrames());
+      },
+    };
+    const result = await runProviderSmoke(
+      runDeps({
+        ledger,
+        processPort: port,
+        prepareRepository: async () => fakeRepository(() => false),
+      }),
+    );
+    expect(spawned).toBe(1); // Codex only
+    const codex = result.providers.find((p) => p.provider === 'openai');
+    const claude = result.providers.find((p) => p.provider === 'anthropic');
+    expect(codex?.exitClassification).toBe('repository_changed');
+    expect(claude?.reachedStage).toBe('security_halt');
+    expect(claude?.reservedCount).toBe(1); // reserved but never spawned
+    expect(claude?.spawnAttemptCount).toBe(0);
+    expect(ledger.spawnMarks.map((m) => m.provider)).toEqual(['openai']);
+  });
+});
+
+describe('SMG-007 reserved/spawn/invocation counts', () => {
+  it('reserves both, spawns each once, and reports spawn-attempt-based invocation counts', async () => {
     const ledger = new InMemoryLedger(grant);
     const spawns: string[] = [];
     const port: SmokeProcessPort = {
-      spawn: (request) => {
-        spawns.push(String(request.argv[0]));
-        return fakeProcess(
-          request.argv[0] === 'exec' ? codexSuccessFrames() : claudeSuccessFrames(),
-        );
+      spawn: (r) => {
+        spawns.push(String(r.argv[0]));
+        return fakeProcess(r.argv[0] === 'exec' ? codexFrames() : claudeFrames());
       },
     };
-    const result = await runProviderSmoke({
-      authorizationId: 'AUTH-1',
-      ledger,
-      processPort: port,
-      prepareRepository: async () => fakeRepository(),
-      models: { openai: codexModel, anthropic: claudeModel },
-    });
-
+    const result = await runProviderSmoke(runDeps({ ledger, processPort: port }));
     expect(spawns).toEqual(['exec', '--print']);
     expect(result.providers.map((p) => p.reachedStage)).toEqual([
       'invocation_completed',
       'invocation_completed',
     ]);
+    expect(result.providers.map((p) => p.reservedCount)).toEqual([1, 1]);
+    expect(result.providers.map((p) => p.spawnAttemptCount)).toEqual([1, 1]);
     expect(result.providers.map((p) => p.invocationCount)).toEqual([1, 1]);
-    expect(result.providers.every((p) => p.strictResult)).toBe(true);
+    expect(result.cleanup).toBe('complete');
     expect(isSmokePass(result)).toBe(true);
-    expect(ledger.outcomes).toHaveLength(2);
   });
 
-  it('denies a rerun with zero spawn while reporting the real prior cumulative count', async () => {
+  it('a spawn failure keeps a durable spawn-attempt count of 1 with no OS child', async () => {
     const ledger = new InMemoryLedger(grant);
-    ledger.claimed = true; // a prior run already claimed the authorization.
-    ledger.used.openai = 1;
-    ledger.used.anthropic = 1;
+    const port: SmokeProcessPort = { spawn: () => Promise.reject(new Error('synthetic failure')) };
+    const result = await runProviderSmoke(runDeps({ ledger, processPort: port }));
+    const codex = result.providers.find((p) => p.provider === 'openai');
+    expect(codex?.exitClassification).toBe('spawn_failed');
+    expect(codex?.spawnAttemptCount).toBe(1); // marker written before the failed spawn
+    expect(codex?.childProcessCount).toBe(0);
+  });
+
+  it('a rerun of the same authorization performs 0 spawn for both providers', async () => {
+    const ledger = new InMemoryLedger(grant);
+    ledger.claimed = true;
+    ledger.reservedCount.openai = 1;
+    ledger.reservedCount.anthropic = 1;
+    ledger.spawnCount.openai = 1;
+    ledger.spawnCount.anthropic = 1;
     const port: SmokeProcessPort = {
       spawn: () => {
-        throw new Error('a claim-denied rerun must never spawn a provider');
+        throw new Error('a claim-denied rerun must never spawn');
       },
     };
-    const result = await runProviderSmoke({
-      authorizationId: 'AUTH-1',
-      ledger,
-      processPort: port,
-      prepareRepository: async () => {
-        throw new Error('a claim-denied rerun must never prepare a repository');
-      },
-      models: { openai: codexModel, anthropic: claudeModel },
-    });
+    const result = await runProviderSmoke(runDeps({ ledger, processPort: port }));
     expect(result.providers.every((p) => p.reachedStage === 'run_claim_denied')).toBe(true);
-    expect(result.providers.map((p) => p.invocationCount)).toEqual([1, 1]);
+    expect(result.providers.map((p) => p.reservedCount)).toEqual([1, 1]);
+    expect(result.providers.map((p) => p.spawnAttemptCount)).toEqual([1, 1]);
     expect(isSmokePass(result)).toBe(false);
   });
+});
 
-  it('preserves computed evidence when synthetic repository cleanup encounters EBUSY', async () => {
-    const computed = { schemaVersion: 1 as const, providers: [] };
-    const removedPaths: string[] = [];
-    const failingRemover: ProviderSmokeDirectoryRemover = async (path) => {
-      removedPaths.push(path.toString());
-      if (path.toString() === paths.repository) {
-        throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+describe('SMG-020 evidence sanitization', () => {
+  it('the run envelope leaks no raw path/token/email/org', async () => {
+    const leakyPort: SmokeProcessPort = {
+      spawn: (request) => ({
+        stdout: byteStream(request.argv[0] === 'exec' ? codexFrames() : claudeFrames()),
+        stderr: byteStream([
+          'Bearer sk-SENTINELSECRETVALUE contact user@example.org org=AcmeOrg\n',
+        ]),
+        exited: Promise.resolve({ exitCode: 0, signal: null }),
+        writeStdin: () => undefined,
+        terminateOwnedTree: () => undefined,
+        countOwnedDescendants: () => 0,
+      }),
+    };
+    const probe = fakeProbe({
+      openai: { resolvedPath: 'C:\\secret-path\\codex.exe' },
+      anthropic: { resolvedPath: 'C:\\secret-path\\claude.exe' },
+    });
+    const result = await runProviderSmoke(runDeps({ processPort: leakyPort, probe }));
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('secret-path'); // raw executable path
+    expect(serialized).not.toContain('SENTINELSECRETVALUE'); // raw token
+    expect(serialized).not.toContain('user@example.org'); // raw email
+    expect(serialized).not.toContain('AcmeOrg'); // raw org
+    // The credential-shaped stderr is only COUNTED, never emitted.
+    expect(result.providers.some((p) => p.sanitizerFindingCount > 0)).toBe(true);
+    // executable identity is only the fingerprint hash.
+    expect(result.providers[0]?.executableFingerprint).toMatch(/^[a-f0-9]{64}$/);
+  });
+});
+
+describe('grant issuance (DA) + CLI dispatch (RB5/RB6)', () => {
+  const grantEnv = { [AUTHORIZATION_ID_ENV]: 'AUTH-9', [CODEX_MODEL_ENV]: 'gpt-5.1-codex' };
+  const grantIssuer: GrantIssuer = {
+    grant: (request: GrantRequest) => ({
+      ...grant,
+      authorizationId: request.authorizationId,
+      providers: {
+        openai: {
+          model: request.providers.openai.model,
+          maxInvocations: 1,
+          binding: request.providers.openai.binding,
+        },
+        anthropic: {
+          model: request.providers.anthropic.model,
+          maxInvocations: 1,
+          binding: request.providers.anthropic.binding,
+        },
+      },
+    }),
+  };
+
+  it('issueGrant binds operator models + probed bindings and defaults claude to sonnet', () => {
+    const captured: GrantRequest[] = [];
+    const issued = issueGrant({
+      environment: grantEnv,
+      ledger: {
+        grant: (r) => {
+          captured.push(r);
+          return grantIssuer.grant(r);
+        },
+      },
+      probe: fakeProbe(),
+      policy: livePolicy,
+    });
+    expect(captured[0]?.providers.openai.model).toBe('gpt-5.1-codex');
+    expect(captured[0]?.providers.anthropic.model).toBe(DEFAULT_CLAUDE_SMOKE_MODEL);
+    expect(captured[0]?.providers.openai.binding.executableFingerprint).toBe(FP.openai);
+    expect(issued.authorizationId).toBe('AUTH-9');
+    expect(() =>
+      issueGrant({ environment: {}, ledger: grantIssuer, probe: fakeProbe() }),
+    ).toThrow();
+  });
+
+  it('the grant CLI envelope emits only a hashed authorization id and no raw id/path/identity', async () => {
+    const lines: string[] = [];
+    let exit = -1;
+    await runSmokeCli(['grant'], {
+      environment: grantEnv,
+      runGrant: () =>
+        issueGrant({
+          environment: grantEnv,
+          ledger: grantIssuer,
+          probe: fakeProbe(),
+          policy: livePolicy,
+        }),
+      runSmoke: async () => {
+        throw new Error('must not run');
+      },
+      stdout: (line) => lines.push(line),
+      setExitCode: (code) => (exit = code),
+    });
+    expect(exit).toBe(0);
+    const envelope = JSON.parse(lines[0] ?? '{}') as GrantEnvelope;
+    expect(envelope).toMatchObject({ schemaVersion: 1, mode: 'grant', result: 'granted' });
+    expect(envelope.authorizationIdHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(Object.keys(envelope)).not.toContain('authorizationId');
+    const serialized = lines[0] ?? '';
+    expect(serialized).not.toContain('AUTH-9'); // no raw authorization id
+    expect(serialized).not.toContain('C:\\trusted'); // no raw path
+    expect(serialized).not.toMatch(/token=|@example|Bearer\s/i);
+  });
+
+  it('a grant failure emits a sanitized grant error envelope, never a raw exception', async () => {
+    const lines: string[] = [];
+    let exit = -1;
+    await runSmokeCli(['grant'], {
+      environment: grantEnv,
+      runGrant: () => {
+        throw new ProviderLedgerError('PROVIDER_GRANT_CONFLICT', 'sanitized');
+      },
+      runSmoke: async () => ({ schemaVersion: 1, providers: [], cleanup: 'not_reached' }),
+      stdout: (line) => lines.push(line),
+      setExitCode: (code) => (exit = code),
+    });
+    expect(exit).toBe(1);
+    const envelope = JSON.parse(lines[0] ?? '{}') as GrantEnvelope;
+    expect(envelope).toEqual({
+      schemaVersion: 1,
+      mode: 'grant',
+      result: 'error',
+      errorCode: 'PROVIDER_GRANT_CONFLICT',
+    });
+    expect(lines[0]).not.toContain('boom');
+  });
+
+  it('the run CLI requires the opt-in and never emits [] or a raw exception', async () => {
+    const noOptIn: string[] = [];
+    let exitA = -1;
+    await runSmokeCli([], {
+      environment: {},
+      runGrant: () => grant,
+      runSmoke: async () => {
+        throw new Error('should not run without opt-in');
+      },
+      stdout: (line) => noOptIn.push(line),
+      setExitCode: (code) => (exitA = code),
+    });
+    expect(exitA).toBe(1);
+    expect(noOptIn).toEqual([]); // no run envelope emitted
+
+    const lines: string[] = [];
+    let exitB = -1;
+    await runSmokeCli([], {
+      environment: { ORION_REAL_PROVIDER_TESTS: '1' },
+      runGrant: () => grant,
+      runSmoke: async () => {
+        throw new Error('deferred failure');
+      },
+      stdout: (line) => lines.push(line),
+      setExitCode: (code) => (exitB = code),
+    });
+    expect(exitB).toBe(1);
+    const envelope = JSON.parse(lines[0] ?? '{}') as ProviderSmokeEnvelope;
+    expect(envelope.schemaVersion).toBe(1);
+    expect(Array.isArray(envelope.providers)).toBe(true);
+    expect(envelope.providers).toHaveLength(2);
+    expect(lines[0]).not.toContain('deferred failure');
+  });
+});
+
+describe('runDeferredProviderSmoke injectable seams (RB5)', () => {
+  const fakeRuntime = {
+    NativeProviderProcessPort: class {
+      public spawn(request: { readonly argv: readonly string[] }): SmokeProcess {
+        return fakeProcess(request.argv[0] === 'exec' ? codexFrames() : claudeFrames());
       }
+    },
+    buildProviderEnvironment: () => ({}),
+    resolveTrustedProviderExecutable: (path: string) => path,
+  } as unknown as HardenedRuntime;
+  function deferredDeps(
+    overrides: Partial<DeferredSmokeDependencies>,
+  ): Partial<DeferredSmokeDependencies> {
+    return {
+      environment: { [AUTHORIZATION_ID_ENV]: 'AUTH-1', ORION_REAL_PROVIDER_TESTS: '1' },
+      loadRuntime: async () => fakeRuntime,
+      makeProbe: () => fakeProbe(),
+      ledgerFactory: () => new InMemoryLedger(grant),
+      resourceTracker: new ResourceTracker(async () => undefined),
+      prepareRepository: async (_runtime, _env, tracker) => {
+        tracker.track('C:\\temp\\smoke-runtime');
+        return fakeRepository();
+      },
+      now: () => new Date('2026-07-24T00:00:00.000Z'),
+      ...overrides,
     };
-    const evidence = await runProviderSmokeWithBestEffortCleanup(
-      async () => computed,
-      () => [paths.repository, 'C:\\runtime'],
-      failingRemover,
+  }
+
+  it('a runtime-load failure returns preflight_unavailable and still cleans up', async () => {
+    let cleaned = 0;
+    const tracker = new ResourceTracker(async () => {
+      cleaned += 1;
+    });
+    const result = await runDeferredProviderSmoke(
+      deferredDeps({
+        resourceTracker: tracker,
+        loadRuntime: async () => {
+          throw new Error('dist missing');
+        },
+      }),
     );
-    expect(evidence).toBe(computed);
-    expect(removedPaths).toEqual([paths.repository, 'C:\\runtime']);
-    expect(PROVIDER_SMOKE_CLEANUP_MAX_RETRIES).toBe(3);
-    expect(PROVIDER_SMOKE_CLEANUP_RETRY_DELAY_MS).toBe(100);
+    expect(result.providers.every((p) => p.reachedStage === 'preflight_unavailable')).toBe(true);
+    expect(result.providers.every((p) => p.errorCode === 'RUNTIME_LOAD_FAILED')).toBe(true);
+    expect(cleaned).toBe(0); // nothing tracked, nothing to remove
   });
 
-  it('issues a grant (0 provider calls) binding operator-selected models to an authorization id', () => {
-    const issued: Array<{ authorizationId: string; codexModel: string; claudeModel: string }> = [];
-    const issuer: GrantIssuer = {
-      grant: (request) => {
-        issued.push(request);
-        return { ...grant, providers: { ...grant.providers } };
-      },
-    };
-    issueGrant(
-      { [AUTHORIZATION_ID_ENV]: 'AUTH-9', [CODEX_MODEL_ENV]: 'gpt-5.1-codex' },
-      () => issuer,
-    );
-    expect(issued).toEqual([
+  it('the happy deferred path spawns via the injected fakes and cleans tracked dirs', async () => {
+    const removed: string[] = [];
+    const tracker = new ResourceTracker(async (path) => {
+      removed.push(path.toString());
+    });
+    const result = await runDeferredProviderSmoke(deferredDeps({ resourceTracker: tracker }));
+    expect(removed).toContain('C:\\temp\\smoke-runtime'); // cleanup invoked in the real path
+    expect(result.providers).toHaveLength(2);
+  });
+});
+
+describe('invokeSmokeProvider inspection (shared normalizer)', () => {
+  it('normalizes a Codex success stream and reports the bound fingerprint', async () => {
+    const evidence = await invokeSmokeProvider(
       {
-        authorizationId: 'AUTH-9',
-        codexModel: 'gpt-5.1-codex',
-        claudeModel: DEFAULT_CLAUDE_SMOKE_MODEL,
+        provider: 'openai',
+        executable: RESOLVED.openai,
+        argv: codexSmokeArgv(paths, 'gpt-5.1-codex'),
+        cwd: paths.repository,
+        environment: {},
+        permissionMode: 'read-only',
+        executableFingerprint: FP.openai,
       },
-    ]);
-    expect(() => issueGrant({ [CODEX_MODEL_ENV]: 'gpt-5.1-codex' }, () => issuer)).toThrow();
-  });
-
-  it('resolves the ledger directory from an override or the LOCALAPPDATA default', () => {
-    expect(resolveLedgerDirectory({ [LEDGER_DIR_ENV]: 'D:\\ledger' })).toBe('D:\\ledger');
-    expect(resolveLedgerDirectory({ LOCALAPPDATA: 'C:\\Users\\x\\AppData\\Local' })).toBe(
-      'C:\\Users\\x\\AppData\\Local\\Orion\\provider-smoke-ledger',
+      { spawn: () => fakeProcess(codexFrames()) },
+      () => new Date('2026-07-24T00:00:00.000Z'),
     );
-  });
-
-  it('flags a repository mutation as repository_changed and treats empty evidence as non-pass', () => {
-    const succeeded = {
-      ...pendingEvidence('openai', 'invocation_completed', 1),
-      exitClassification: 'succeeded' as const,
-    };
-    expect(withRepositoryStatus(succeeded, true).exitClassification).toBe('succeeded');
-    expect(withRepositoryStatus(succeeded, false).exitClassification).toBe('repository_changed');
-    expect(isSmokePass({ schemaVersion: 1, providers: [] })).toBe(false);
+    expect(evidence).toMatchObject({
+      reachedStage: 'invocation_completed',
+      exitClassification: 'succeeded',
+      strictResult: true,
+      executableFingerprint: FP.openai,
+      cliVersion: '0.145.0',
+      normalizedEventCounts: { 'run.started': 1, 'run.usage': 1, 'run.completed': 1 },
+    });
   });
 });

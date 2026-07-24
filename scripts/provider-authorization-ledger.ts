@@ -11,16 +11,17 @@ import { join } from 'node:path';
 
 // A durable, fail-closed one-time authorization ledger for the deferred real provider smoke.
 //
-// Design (crash/concurrency-safe on Windows, no global lock, no counter rewrite):
-//   <ledgerRoot>/<authId>/grant.json                    immutable grant terms (wx once)
-//   <ledgerRoot>/<authId>/run.claim                     one-shot run gate (wx once)
-//   <ledgerRoot>/<authId>/slots/<provider>-<n>.slot     per-invocation reservation marker (wx)
-//   <ledgerRoot>/<authId>/slots/<provider>-<n>.outcome.json  sanitized outcome (best effort)
+// Layout (crash/concurrency-safe on Windows, no global lock, no counter rewrite):
+//   <ledgerRoot>/<authId>/grant.json                       immutable grant terms (wx once)
+//   <ledgerRoot>/<authId>/run.claim                        one-shot run gate (wx once)
+//   <ledgerRoot>/<authId>/slots/<provider>-<n>.slot        per-invocation reservation (wx)
+//   <ledgerRoot>/<authId>/slots/<provider>-<n>.spawn       spawn attempt, written BEFORE spawn (wx)
+//   <ledgerRoot>/<authId>/slots/<provider>-<n>.outcome.json sanitized outcome (best effort)
 //
-// A slot/claim marker is created with an exclusive `wx` open BEFORE any provider spawn, so a crash
-// or ambiguous outcome leaves the marker in place and the slot stays USED. The cumulative used
-// count is a fresh count of `.slot` markers — never a constant. Re-running the same authorization
-// id finds `run.claim` already present and performs zero spawns.
+// A `.slot` reserves; a `.spawn` records that a real process launch was ATTEMPTED. Both are created
+// with an exclusive `wx` open, so a crash leaves them in place: reserved slots and spawn attempts
+// are durable and never decrease. `usage()` reports both counts from fresh directory reads. Re-running
+// the same authorization id finds `run.claim` present and performs zero spawns.
 
 export type SmokeProviderKey = 'openai' | 'anthropic';
 
@@ -40,12 +41,28 @@ export class ProviderLedgerError extends Error {
   }
 }
 
+export interface ProviderBinding {
+  readonly provider: SmokeProviderKey;
+  readonly cliVersion: string;
+  readonly executableBasename: string;
+  readonly executableFingerprint: string;
+  readonly model: string;
+}
+
 export interface ProviderGrantTerms {
   readonly model: string;
   readonly maxInvocations: number;
+  readonly binding: ProviderBinding;
 }
 
-export interface GrantOptions {
+export interface PolicyProjection {
+  readonly argvPolicyVersion: number;
+  readonly schemaHash: string;
+  readonly promptHash: string;
+  readonly repositoryTemplateVersion: number;
+}
+
+export interface GrantOptions extends PolicyProjection {
   readonly codexSandbox: 'read-only';
   readonly claudePermissionMode: 'dontAsk';
   readonly effort: 'low';
@@ -56,7 +73,7 @@ export interface GrantOptions {
 }
 
 export interface AuthorizationGrant {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly authorizationId: string;
   readonly createdAt: string;
   readonly providers: {
@@ -66,10 +83,18 @@ export interface AuthorizationGrant {
   readonly options: GrantOptions;
 }
 
+export interface ProviderGrantInput {
+  readonly model: string;
+  readonly binding: ProviderBinding;
+}
+
 export interface GrantRequest {
   readonly authorizationId: string;
-  readonly codexModel: string;
-  readonly claudeModel: string;
+  readonly providers: {
+    readonly openai: ProviderGrantInput;
+    readonly anthropic: ProviderGrantInput;
+  };
+  readonly policy: PolicyProjection;
 }
 
 export interface Reservation {
@@ -79,10 +104,12 @@ export interface Reservation {
 
 export interface ProviderUsage {
   readonly granted: number;
-  readonly used: number;
+  readonly reserved: number;
+  readonly spawnAttempts: number;
 }
 
-export const SMOKE_GRANT_OPTIONS: GrantOptions = {
+/** Fixed (non-policy) execution options; exact values are enforced on every grant read. */
+export const SMOKE_GRANT_OPTIONS = {
   codexSandbox: 'read-only',
   claudePermissionMode: 'dontAsk',
   effort: 'low',
@@ -90,13 +117,41 @@ export const SMOKE_GRANT_OPTIONS: GrantOptions = {
   disallowedTools: 'Bash,Edit,Write,WebFetch,WebSearch',
   timeoutMs: 5 * 60 * 1000,
   maxBudgetUsd: 0.5,
-};
+} as const;
 
+export const GRANT_SCHEMA_VERSION = 2 as const;
 export const SMOKE_MAX_INVOCATIONS = 1;
 
 const AUTHORIZATION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const MODEL_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
+const HEX64 = /^[a-f0-9]{64}$/;
+const CLI_VERSION = /^\d+(?:\.\d+){1,3}$/;
+const EXECUTABLE_BASENAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const ISO8601_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
 const FORBIDDEN_SEGMENTS = new Set(['.git', '.orion', '.gjc', 'node_modules']);
+
+const ROOT_KEYS = ['authorizationId', 'createdAt', 'options', 'providers', 'schemaVersion'];
+const TERMS_KEYS = ['binding', 'maxInvocations', 'model'];
+const BINDING_KEYS = [
+  'cliVersion',
+  'executableBasename',
+  'executableFingerprint',
+  'model',
+  'provider',
+];
+const OPTIONS_KEYS = [
+  'allowedTools',
+  'argvPolicyVersion',
+  'claudePermissionMode',
+  'codexSandbox',
+  'disallowedTools',
+  'effort',
+  'maxBudgetUsd',
+  'promptHash',
+  'repositoryTemplateVersion',
+  'schemaHash',
+  'timeoutMs',
+];
 
 export class ProviderAuthorizationLedger {
   private readonly root: string;
@@ -109,27 +164,25 @@ export class ProviderAuthorizationLedger {
     this.root = assertSafeLedgerRoot(ledgerRoot, options.forbiddenRoots ?? []);
     this.now = options.now ?? (() => new Date());
     mkdirSync(this.root, { recursive: true, mode: 0o700 });
-    // Revalidate after creation: the freshly created directory must still resolve to a
-    // contained, non-reparse location.
     assertSafeLedgerRoot(this.root, options.forbiddenRoots ?? []);
   }
 
   public grant(request: GrantRequest): AuthorizationGrant {
     const authorizationId = validateAuthorizationId(request.authorizationId);
-    const codexModel = validateModel(request.codexModel);
-    const claudeModel = validateModel(request.claudeModel);
+    const providers = {
+      openai: buildTerms('openai', request.providers?.openai),
+      anthropic: buildTerms('anthropic', request.providers?.anthropic),
+    };
+    const options = buildOptions(request.policy);
     const authDir = join(this.root, authorizationId);
     mkdirSync(join(authDir, 'slots'), { recursive: true, mode: 0o700 });
     const grantFile = join(authDir, 'grant.json');
     const grant: AuthorizationGrant = {
-      schemaVersion: 1,
+      schemaVersion: GRANT_SCHEMA_VERSION,
       authorizationId,
       createdAt: this.now().toISOString(),
-      providers: {
-        openai: { model: codexModel, maxInvocations: SMOKE_MAX_INVOCATIONS },
-        anthropic: { model: claudeModel, maxInvocations: SMOKE_MAX_INVOCATIONS },
-      },
-      options: SMOKE_GRANT_OPTIONS,
+      providers,
+      options,
     };
 
     if (existsSync(grantFile)) return this.reconcileExistingGrant(grantFile, grant);
@@ -194,6 +247,28 @@ export class ProviderAuthorizationLedger {
     return null;
   }
 
+  /**
+   * Record — ATOMICALLY, immediately before a real `processPort.spawn()` — that a provider launch
+   * was attempted. The `wx` marker survives a crash, so the spawn-attempt count never decreases.
+   */
+  public markSpawnAttempt(
+    authorizationId: string,
+    provider: SmokeProviderKey,
+    ordinal: number,
+  ): void {
+    const id = validateAuthorizationId(authorizationId);
+    const spawnFile = join(this.root, id, 'slots', `${provider}-${ordinal}.spawn`);
+    try {
+      writeFileSync(spawnFile, JSON.stringify({ attemptedAt: this.now().toISOString() }), {
+        encoding: 'utf8',
+        mode: 0o600,
+        flag: 'wx',
+      });
+    } catch (error) {
+      if (!isExists(error)) throw error;
+    }
+  }
+
   /** Record sanitized outcome metadata for a reserved slot. Best effort; never releases a slot. */
   public recordOutcome(
     authorizationId: string,
@@ -214,7 +289,7 @@ export class ProviderAuthorizationLedger {
     }
   }
 
-  /** Fresh cumulative usage for a provider: `used` = live `.slot` marker count. */
+  /** Fresh cumulative usage: reserved = live `.slot` count, spawnAttempts = live `.spawn` count. */
   public usage(authorizationId: string, provider: SmokeProviderKey): ProviderUsage {
     let granted = 0;
     try {
@@ -223,15 +298,20 @@ export class ProviderAuthorizationLedger {
       granted = 0;
     }
     const slotsDir = join(this.root, authorizationId, 'slots');
-    let used = 0;
+    let reserved = 0;
+    let spawnAttempts = 0;
+    let entries: readonly string[] = [];
     try {
-      for (const entry of readdirSync(slotsDir)) {
-        if (/^.+\.slot$/.test(entry) && entry.startsWith(`${provider}-`)) used += 1;
-      }
+      entries = readdirSync(slotsDir);
     } catch {
-      used = 0;
+      entries = [];
     }
-    return { granted, used };
+    for (const entry of entries) {
+      if (!entry.startsWith(`${provider}-`)) continue;
+      if (entry.endsWith('.slot')) reserved += 1;
+      else if (entry.endsWith('.spawn')) spawnAttempts += 1;
+    }
+    return { granted, reserved, spawnAttempts };
   }
 
   private reconcileExistingGrant(
@@ -249,6 +329,80 @@ export class ProviderAuthorizationLedger {
   }
 }
 
+// ---------------------------------------------------------------------------
+// grant construction (validates operator/probe input)
+// ---------------------------------------------------------------------------
+function buildTerms(
+  provider: SmokeProviderKey,
+  input: ProviderGrantInput | undefined,
+): ProviderGrantTerms {
+  if (input === null || typeof input !== 'object')
+    throw grantInvalid('A provider grant input is missing.');
+  const model = validateModel(input.model);
+  const binding = validateBinding(provider, input.binding, model);
+  return { model, maxInvocations: SMOKE_MAX_INVOCATIONS, binding };
+}
+
+function validateBinding(
+  provider: SmokeProviderKey,
+  binding: ProviderBinding | undefined,
+  model: string,
+): ProviderBinding {
+  if (binding === null || typeof binding !== 'object')
+    throw grantInvalid('A provider binding is missing.');
+  if (binding.provider !== provider) throw grantInvalid('The binding provider does not match.');
+  if (binding.model !== model)
+    throw grantInvalid('The binding model does not match the grant model.');
+  if (typeof binding.cliVersion !== 'string' || !CLI_VERSION.test(binding.cliVersion))
+    throw grantInvalid('The binding CLI version is malformed.');
+  if (
+    typeof binding.executableBasename !== 'string' ||
+    !EXECUTABLE_BASENAME.test(binding.executableBasename)
+  )
+    throw grantInvalid('The binding executable basename is malformed.');
+  if (
+    typeof binding.executableFingerprint !== 'string' ||
+    !HEX64.test(binding.executableFingerprint)
+  )
+    throw grantInvalid('The binding executable fingerprint is malformed.');
+  return {
+    provider,
+    cliVersion: binding.cliVersion,
+    executableBasename: binding.executableBasename,
+    executableFingerprint: binding.executableFingerprint,
+    model,
+  };
+}
+
+function buildOptions(policy: PolicyProjection | undefined): GrantOptions {
+  if (policy === null || typeof policy !== 'object')
+    throw grantInvalid('The grant policy is missing.');
+  return { ...SMOKE_GRANT_OPTIONS, ...validatePolicy(policy) };
+}
+
+function validatePolicy(policy: PolicyProjection): PolicyProjection {
+  if (!Number.isSafeInteger(policy.argvPolicyVersion) || policy.argvPolicyVersion < 1)
+    throw grantInvalid('The argv policy version is invalid.');
+  if (
+    !Number.isSafeInteger(policy.repositoryTemplateVersion) ||
+    policy.repositoryTemplateVersion < 1
+  )
+    throw grantInvalid('The repository template version is invalid.');
+  if (typeof policy.schemaHash !== 'string' || !HEX64.test(policy.schemaHash))
+    throw grantInvalid('The schema hash is malformed.');
+  if (typeof policy.promptHash !== 'string' || !HEX64.test(policy.promptHash))
+    throw grantInvalid('The prompt hash is malformed.');
+  return {
+    argvPolicyVersion: policy.argvPolicyVersion,
+    repositoryTemplateVersion: policy.repositoryTemplateVersion,
+    schemaHash: policy.schemaHash,
+    promptHash: policy.promptHash,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// ledger path containment
+// ---------------------------------------------------------------------------
 export function assertSafeLedgerRoot(dir: string, forbiddenRoots: readonly string[]): string {
   if (typeof dir !== 'string' || dir.length === 0) {
     throw pathUnsafe('The ledger directory must be a non-empty path.');
@@ -326,22 +480,19 @@ function canonicalizeForCompare(value: string): string {
   return resolved.replace(/\\+$/, '').toLowerCase();
 }
 
+// ---------------------------------------------------------------------------
+// strict grant parsing (recursive exact key sets + formats)
+// ---------------------------------------------------------------------------
 function validateAuthorizationId(value: string): string {
   if (typeof value !== 'string' || !AUTHORIZATION_ID.test(value)) {
-    throw new ProviderLedgerError(
-      'PROVIDER_GRANT_INVALID',
-      'The authorization id is missing or malformed.',
-    );
+    throw grantInvalid('The authorization id is missing or malformed.');
   }
   return value;
 }
 
 function validateModel(value: string): string {
   if (typeof value !== 'string' || !MODEL_IDENTIFIER.test(value)) {
-    throw new ProviderLedgerError(
-      'PROVIDER_GRANT_INVALID',
-      'A provider model must be an operator-selected identifier.',
-    );
+    throw grantInvalid('A provider model must be an operator-selected identifier.');
   }
   return value;
 }
@@ -351,34 +502,82 @@ function parseGrant(contents: string, authorizationId: string): AuthorizationGra
   try {
     parsed = JSON.parse(contents) as unknown;
   } catch {
-    throw new ProviderLedgerError('PROVIDER_GRANT_CORRUPT', 'The grant record is not valid JSON.');
+    throw grantCorrupt('The grant record is not valid JSON.');
   }
-  if (!isGrant(parsed) || parsed.authorizationId !== authorizationId) {
-    throw new ProviderLedgerError('PROVIDER_GRANT_CORRUPT', 'The grant record is malformed.');
+  if (!isStrictGrant(parsed) || parsed.authorizationId !== authorizationId) {
+    throw grantCorrupt('The grant record is malformed.');
   }
   return parsed;
 }
 
-function isGrant(value: unknown): value is AuthorizationGrant {
-  if (typeof value !== 'object' || value === null) return false;
+function isStrictGrant(value: unknown): value is AuthorizationGrant {
+  if (!isExactObject(value, ROOT_KEYS)) return false;
   const grant = value as Record<string, unknown>;
-  if (grant.schemaVersion !== 1 || typeof grant.authorizationId !== 'string') return false;
-  const providers = grant.providers as Record<string, unknown> | undefined;
-  if (providers === undefined) return false;
+  if (grant.schemaVersion !== GRANT_SCHEMA_VERSION) return false;
+  if (typeof grant.authorizationId !== 'string' || !AUTHORIZATION_ID.test(grant.authorizationId))
+    return false;
+  if (typeof grant.createdAt !== 'string' || !isIsoUtc(grant.createdAt)) return false;
+  if (!isExactObject(grant.providers, ['anthropic', 'openai'])) return false;
+  const providers = grant.providers as Record<string, unknown>;
+  if (!isStrictTerms(providers.openai, 'openai')) return false;
+  if (!isStrictTerms(providers.anthropic, 'anthropic')) return false;
+  return isStrictOptions(grant.options);
+}
+
+function isStrictTerms(value: unknown, provider: SmokeProviderKey): boolean {
+  if (!isExactObject(value, TERMS_KEYS)) return false;
+  const terms = value as Record<string, unknown>;
+  if (typeof terms.model !== 'string' || !MODEL_IDENTIFIER.test(terms.model)) return false;
+  if (terms.maxInvocations !== SMOKE_MAX_INVOCATIONS) return false;
+  return isStrictBinding(terms.binding, provider, terms.model);
+}
+
+function isStrictBinding(value: unknown, provider: SmokeProviderKey, model: string): boolean {
+  if (!isExactObject(value, BINDING_KEYS)) return false;
+  const binding = value as Record<string, unknown>;
   return (
-    isTerms(providers.openai) && isTerms(providers.anthropic) && typeof grant.options === 'object'
+    binding.provider === provider &&
+    binding.model === model &&
+    typeof binding.cliVersion === 'string' &&
+    CLI_VERSION.test(binding.cliVersion) &&
+    typeof binding.executableBasename === 'string' &&
+    EXECUTABLE_BASENAME.test(binding.executableBasename) &&
+    typeof binding.executableFingerprint === 'string' &&
+    HEX64.test(binding.executableFingerprint)
   );
 }
 
-function isTerms(value: unknown): value is ProviderGrantTerms {
-  if (typeof value !== 'object' || value === null) return false;
-  const terms = value as Record<string, unknown>;
+function isStrictOptions(value: unknown): boolean {
+  if (!isExactObject(value, OPTIONS_KEYS)) return false;
+  const options = value as Record<string, unknown>;
   return (
-    typeof terms.model === 'string' &&
-    typeof terms.maxInvocations === 'number' &&
-    Number.isSafeInteger(terms.maxInvocations) &&
-    terms.maxInvocations >= 1
+    options.codexSandbox === SMOKE_GRANT_OPTIONS.codexSandbox &&
+    options.claudePermissionMode === SMOKE_GRANT_OPTIONS.claudePermissionMode &&
+    options.effort === SMOKE_GRANT_OPTIONS.effort &&
+    options.allowedTools === SMOKE_GRANT_OPTIONS.allowedTools &&
+    options.disallowedTools === SMOKE_GRANT_OPTIONS.disallowedTools &&
+    options.timeoutMs === SMOKE_GRANT_OPTIONS.timeoutMs &&
+    options.maxBudgetUsd === SMOKE_GRANT_OPTIONS.maxBudgetUsd &&
+    Number.isSafeInteger(options.argvPolicyVersion) &&
+    (options.argvPolicyVersion as number) >= 1 &&
+    Number.isSafeInteger(options.repositoryTemplateVersion) &&
+    (options.repositoryTemplateVersion as number) >= 1 &&
+    typeof options.schemaHash === 'string' &&
+    HEX64.test(options.schemaHash) &&
+    typeof options.promptHash === 'string' &&
+    HEX64.test(options.promptHash)
   );
+}
+
+function isExactObject(value: unknown, keys: readonly string[]): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const actual = Object.keys(value as Record<string, unknown>).sort();
+  if (actual.length !== keys.length) return false;
+  return keys.every((key, index) => actual[index] === key);
+}
+
+function isIsoUtc(value: string): boolean {
+  return ISO8601_UTC.test(value) && !Number.isNaN(Date.parse(value));
 }
 
 function grantProjection(grant: AuthorizationGrant): string {
@@ -405,6 +604,14 @@ function isExists(error: unknown): boolean {
   return (
     typeof error === 'object' && error !== null && (error as { code?: string }).code === 'EEXIST'
   );
+}
+
+function grantInvalid(message: string): ProviderLedgerError {
+  return new ProviderLedgerError('PROVIDER_GRANT_INVALID', message);
+}
+
+function grantCorrupt(message: string): ProviderLedgerError {
+  return new ProviderLedgerError('PROVIDER_GRANT_CORRUPT', message);
 }
 
 function pathUnsafe(message: string): ProviderLedgerError {
