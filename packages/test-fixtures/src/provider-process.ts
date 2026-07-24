@@ -285,7 +285,13 @@ const claudeFrames = {
     uuid: 'claude-usage-1',
     usage: { input_tokens: 11, output_tokens: 7, cache_read_input_tokens: 5 },
   },
-  retry: { type: 'system', subtype: 'api_retry', uuid: 'claude-retry-1', attempt: 1, retry_delay_ms: 30_000 },
+  retry: {
+    type: 'system',
+    subtype: 'api_retry',
+    uuid: 'claude-retry-1',
+    attempt: 1,
+    retry_delay_ms: 30_000,
+  },
   unknown: { type: 'future.synthetic_signal', uuid: 'claude-unknown-1' },
 };
 
@@ -456,7 +462,10 @@ const makeProviderFixtures = (provider: FakeProvider): readonly FakeProcessFixtu
       : {
           type: 'assistant',
           uuid: `${provider}-korean-1`,
-          message: { id: `${provider}-korean-msg`, content: [{ type: 'text', text: '합성 한국어 출력' }] },
+          message: {
+            id: `${provider}-korean-msg`,
+            content: [{ type: 'text', text: '합성 한국어 출력' }],
+          },
         },
   );
   const koreanMarker = encode('합');

@@ -134,7 +134,11 @@ export class ProviderAuthorizationLedger {
 
     if (existsSync(grantFile)) return this.reconcileExistingGrant(grantFile, grant);
     try {
-      writeFileSync(grantFile, JSON.stringify(grant), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+      writeFileSync(grantFile, JSON.stringify(grant), {
+        encoding: 'utf8',
+        mode: 0o600,
+        flag: 'wx',
+      });
       return grant;
     } catch (error) {
       if (isExists(error)) return this.reconcileExistingGrant(grantFile, grant);
@@ -256,7 +260,10 @@ export function assertSafeLedgerRoot(dir: string, forbiddenRoots: readonly strin
   if (!/^[A-Za-z]:\\/.test(normalized)) {
     throw pathUnsafe('The ledger directory must be a local drive-letter absolute path.');
   }
-  const segments = normalized.slice(3).split('\\').filter((segment) => segment.length > 0);
+  const segments = normalized
+    .slice(3)
+    .split('\\')
+    .filter((segment) => segment.length > 0);
   if (segments.some((segment) => segment.includes(':'))) {
     throw pathUnsafe('Alternate data stream ledger paths are not permitted.');
   }
@@ -290,7 +297,9 @@ function canonicalizeExistingAncestor(path: string): string {
     try {
       const canonicalAncestor = realpathSync.native(candidate);
       const remainder = parts.slice(end);
-      return remainder.length === 0 ? canonicalAncestor : [canonicalAncestor, ...remainder].join('\\');
+      return remainder.length === 0
+        ? canonicalAncestor
+        : [canonicalAncestor, ...remainder].join('\\');
     } catch {
       throw pathUnsafe('The ledger directory could not be canonicalized.');
     }
@@ -303,8 +312,7 @@ function isContainedCaseInsensitive(candidate: string, root: string): boolean {
   const normalizedCandidate = canonicalizeForCompare(candidate);
   const normalizedRoot = canonicalizeForCompare(root);
   return (
-    normalizedCandidate === normalizedRoot ||
-    normalizedCandidate.startsWith(`${normalizedRoot}\\`)
+    normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}\\`)
   );
 }
 
@@ -357,7 +365,9 @@ function isGrant(value: unknown): value is AuthorizationGrant {
   if (grant.schemaVersion !== 1 || typeof grant.authorizationId !== 'string') return false;
   const providers = grant.providers as Record<string, unknown> | undefined;
   if (providers === undefined) return false;
-  return isTerms(providers.openai) && isTerms(providers.anthropic) && typeof grant.options === 'object';
+  return (
+    isTerms(providers.openai) && isTerms(providers.anthropic) && typeof grant.options === 'object'
+  );
 }
 
 function isTerms(value: unknown): value is ProviderGrantTerms {
@@ -392,7 +402,9 @@ function stableStringify(value: unknown): string {
 }
 
 function isExists(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && (error as { code?: string }).code === 'EEXIST';
+  return (
+    typeof error === 'object' && error !== null && (error as { code?: string }).code === 'EEXIST'
+  );
 }
 
 function pathUnsafe(message: string): ProviderLedgerError {

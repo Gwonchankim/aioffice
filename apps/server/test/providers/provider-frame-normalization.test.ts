@@ -137,9 +137,9 @@ describe('normalizeCodexFrame', () => {
   });
 
   it('rejects malformed frames and ignores unknown types', () => {
-    expect(normalizeCodexFrame({ type: 'item.completed', item: { type: 'agent_message' } })).toEqual(
-      { kind: 'invalid' },
-    );
+    expect(
+      normalizeCodexFrame({ type: 'item.completed', item: { type: 'agent_message' } }),
+    ).toEqual({ kind: 'invalid' });
     expect(normalizeCodexFrame({ type: 'turn.started' })).toEqual({ kind: 'unknown' });
     expect(normalizeCodexFrame({ type: 'error', message: 'x' })).toEqual({ kind: 'unknown' });
     expect(normalizeCodexFrame('not-a-frame')).toEqual({ kind: 'invalid' });
@@ -257,9 +257,9 @@ describe('normalizeClaudeFrame', () => {
         }),
       ).items[0],
     ).toMatchObject({ kind: 'retry', attempt: 2, delayMs: 500 });
-    expect(
-      normalizeClaudeFrame({ type: 'system', subtype: 'api_retry', attempt: 2 }),
-    ).toEqual({ kind: 'unknown' });
+    expect(normalizeClaudeFrame({ type: 'system', subtype: 'api_retry', attempt: 2 })).toEqual({
+      kind: 'unknown',
+    });
     expect(normalizeClaudeFrame({ type: 'assistant', uuid: 'a2', message: {} })).toEqual({
       kind: 'invalid',
     });

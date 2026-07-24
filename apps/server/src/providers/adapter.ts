@@ -582,7 +582,9 @@ export function buildProviderFrameMapping(
 
   return {
     kind: 'recognized',
-    ...(normalized.frameIdentity === undefined ? {} : { providerEventId: normalized.frameIdentity }),
+    ...(normalized.frameIdentity === undefined
+      ? {}
+      : { providerEventId: normalized.frameIdentity }),
     ...(sessionMarker === undefined ? {} : { sessionMarker }),
     ...(result === undefined ? {} : { result }),
     createEvents: (diagnostics) =>
