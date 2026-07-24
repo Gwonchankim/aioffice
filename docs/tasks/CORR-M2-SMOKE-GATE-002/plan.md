@@ -120,3 +120,8 @@ ledger test: v1→v2 GrantRequest/terms/binding/policy; `{granted,used}`→`{gra
 
 ### New reachedStage additions
 `policy_binding_mismatch | executable_binding_mismatch | model_binding_conflict | security_halt` added to `SmokeReachedStage`. Evidence gains `reservedCount`, `spawnAttemptCount`; `invocationCount` is documented as the cumulative spawn-attempt count. Envelope gains `cleanup:'complete'|'incomplete'|'not_reached'` and (grant mode) the separate grant envelope.
+
+## Rev3 — final resolution of P2 round-2 blockers (adopts the reviewer's exact fixes)
+
+- **DA (RB6 identity):** The grant-mode success envelope carries NO raw `authorizationId`. It emits a one-way `authorizationIdHash = sha256(authorizationId)` (hex64) instead; the operator confirms by hashing their own id. The envelope contains only `{ schemaVersion:1, mode:'grant', result, authorizationIdHash, providers:{openai:{model,binding},anthropic:{model,binding}}, policy }` — bindings expose only basename + fingerprint hash + cliVersion + model (never a raw path). A dedicated CLI test asserts the grant output contains NO raw authorization id, path, token, email, or org string (regex-negative) and only the hash.
+- **DB (RB7 fixed options):** `parseGrant` requires `options.timeoutMs === 300000` and `options.maxBudgetUsd === 0.5` EXACTLY (compared against the live `SMOKE_GRANT_OPTIONS` constants, not a range). Any other value — including in-range values like `timeoutMs:299999` or `maxBudgetUsd:0.25` — fails closed as `PROVIDER_GRANT_CORRUPT` ⇒ 0 spawn. Tamper tests cover both exact-value violations. (RB7 range wording in the option validators is superseded by exact-equality to the fixed constants; only the argv/repo-template/schema/prompt policy VERSIONS remain integer-validated.)

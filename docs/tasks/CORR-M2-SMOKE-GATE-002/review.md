@@ -18,4 +18,10 @@
 - `gpt-5.6-sol` catalog grounding confirmed by the reviewer against `packages/agent-catalog/src/seed-skeletons.ts` (used as several profiles' primary/default model) — supports the SMG-009 additive supersession.
 
 ## Round 2
-- (recorded below after the confirmation review of rev2)
+- worker id: `6-SMG-P2-Confirm` | agent: critic (bundled) | model label: openai-codex/gpt-5.6-sol | ~5m6s. Input: plan.md rev2 + source cross-check; 0 real provider calls (CONFIRMED).
+- verdict: **CHANGES_REQUESTED** with **7 of 9 blockers CLOSED** (RB1–RB5, RB8, RB9); SMG-008/SMG-009/fake-only/zero-real-call "approved as written". 2 narrow items remained → resolved in plan rev3:
+  - RB6: grant output carried raw `authorizationId`. → DA: emit `authorizationIdHash` (sha256) only; CLI test asserts no raw id/path/token/identity.
+  - RB7: option validators accepted in-range `timeoutMs`/`maxBudgetUsd` vs the fixed constants. → DB: require exact `timeoutMs===300000` and `maxBudgetUsd===0.5`; in-range tamper (299999, 0.25) fails closed.
+
+## Round 3 (final confirmation)
+- (recorded below)
