@@ -56,12 +56,20 @@ Remove-Item Env:PLAYWRIGHT_BROWSERS_PATH
 
 ## Deferred provider smoke
 
-`pnpm test:providers` is a P4-only command, not part of `pnpm test` or CI. It exits without invoking a provider unless `ORION_REAL_PROVIDER_TESTS=1` is set. The isolated P4 operator must provide trusted absolute native `ORION_CODEX_EXECUTABLE` and `ORION_CLAUDE_EXECUTABLE` values, verify both CLI logins, and run only against the script-created synthetic public Git repository.
+`pnpm test:providers` is a P4-only command, not part of `pnpm test` or CI. It never invokes a provider unless `ORION_REAL_PROVIDER_TESTS=1` is set. The isolated P4 operator must provide trusted absolute native `ORION_CODEX_EXECUTABLE` and `ORION_CLAUDE_EXECUTABLE` values, verify both CLI logins, and run only against the script-created synthetic public Git repository. A real smoke additionally requires separate explicit user authorization.
 
-The harness invokes each provider at most once with fixed read-only argv, `shell:false`, and a five-minute timeout. It compares private GitReadRunner-style HEAD/index/tracked/untracked/tree snapshots before, after each invocation, and after both; any difference fails closed without retry, resume, or fallback. Its only output is sanitized evidence and never includes a prompt, provider output, repository path/content/hash, credentials, identity, or environment.
+The real smoke is a two-gate, one-time process backed by a durable authorization ledger stored **outside** any repository (default `%LOCALAPPDATA%\Orion\provider-smoke-ledger`, override with `ORION_PROVIDER_LEDGER_DIR`).
+
+1. **Grant (0 provider calls).** `pnpm test:providers grant` issues a single immutable grant that binds one `ORION_PROVIDER_AUTHORIZATION_ID` to operator-selected models (`ORION_CODEX_SMOKE_MODEL`, and `ORION_CLAUDE_SMOKE_MODEL` defaulting to `sonnet`) and fixed read-only execution options. Re-granting the same id with identical terms is idempotent; different terms fail closed.
+2. **Run.** `pnpm test:providers` claims the one-time run and reserves each provider's single invocation slot in the durable ledger **before** spawning either provider. A crash, ambiguous outcome, or rerun of the same authorization id therefore performs zero further spawns — the used slot is permanent.
+
+Each provider is invoked at most once with fixed argv (Codex `--output-schema <file>`, Claude `--json-schema <serialized JSON string>`), `shell:false`, and a five-minute timeout. Private GitReadRunner-style HEAD/index/tracked/untracked/tree snapshots are compared before, after each invocation, and after both; any difference fails closed without retry, resume, or fallback. The only output is a single sanitized evidence envelope `{ schemaVersion, providers[] }` with a `reachedStage` and a real cumulative `invocationCount` (never `[]`); it never includes a prompt, provider output, repository path/content/hash, credentials, identity, or environment.
 
 ```powershell
 $env:ORION_REAL_PROVIDER_TESTS='1'
+$env:ORION_PROVIDER_AUTHORIZATION_ID='<authorization-id>'
+$env:ORION_CODEX_SMOKE_MODEL='<operator-selected-codex-model>'
+pnpm test:providers grant
 pnpm test:providers
 Remove-Item Env:ORION_REAL_PROVIDER_TESTS
 ```

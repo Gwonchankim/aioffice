@@ -42,15 +42,18 @@ pnpm start
 pnpm dev
 ```
 
-실제 provider smoke는 기본 검증, CI, P3 implementation에서 실행하지 않는다. P4 validation worker만 login status와 trusted absolute native `ORION_CODEX_EXECUTABLE`/`ORION_CLAUDE_EXECUTABLE`를 확인한 뒤 다음 opt-in command를 사용한다.
+실제 provider smoke는 기본 검증, CI, P3 implementation에서 실행하지 않는다. P4 validation worker만 별도 사용자 승인을 받은 뒤, login status와 trusted absolute native `ORION_CODEX_EXECUTABLE`/`ORION_CLAUDE_EXECUTABLE`를 확인하고, 1회용 grant를 발급한 다음 opt-in command를 사용한다. grant 발급(`pnpm test:providers grant`)은 provider를 호출하지 않으며, 하나의 `ORION_PROVIDER_AUTHORIZATION_ID`를 operator가 선택한 model(`ORION_CODEX_SMOKE_MODEL`, `ORION_CLAUDE_SMOKE_MODEL` 기본 `sonnet`)에 묶는다.
 
 ```powershell
 $env:ORION_REAL_PROVIDER_TESTS='1'
+$env:ORION_PROVIDER_AUTHORIZATION_ID='<authorization-id>'
+$env:ORION_CODEX_SMOKE_MODEL='<operator-selected-codex-model>'
+pnpm test:providers grant
 pnpm test:providers
 Remove-Item Env:ORION_REAL_PROVIDER_TESTS
 ```
 
-이 command는 source repository 밖의 synthetic public temporary Git repository를 만들고, Codex와 Claude를 각각 한 번만 fixed read-only argv, `shell:false`, provider별 5분 timeout으로 실행한다. retry, fallback, resume, web lookup, write tool은 없다. GitReadRunner private HEAD/index/tracked/untracked/file-tree snapshot을 실행 전·Codex 후·Claude 후·both 후에 비교하며, 차이는 즉시 fail-closed한다. console evidence는 provider/version/non-identifying executable fingerprint, invocation/result/usage/cost/timing, normalized event count, one-way session hash, child count, sanitizer count, `repositoryUnchanged`만 허용하며 prompt, stdout/stderr, credentials, identity, path/content/hash, full environment은 기록하지 않는다.
+이 command는 source repository 밖의 synthetic public temporary Git repository를 만들고, spawn 전에 저장소 밖 durable ledger(기본 `%LOCALAPPDATA%\Orion\provider-smoke-ledger`, `ORION_PROVIDER_LEDGER_DIR`로 재정의)에서 1회용 run claim과 provider별 단일 slot을 예약한다. crash·모호한 결과·같은 authorization id 재실행은 이미 사용된 slot 때문에 추가 spawn을 0회로 만든다. Codex와 Claude를 각각 한 번만 fixed read-only argv(Codex `--output-schema <file>`, Claude `--json-schema <serialized JSON string>`), `shell:false`, provider별 5분 timeout으로 실행한다. retry, fallback, resume, web lookup, write tool은 없다. GitReadRunner private HEAD/index/tracked/untracked/file-tree snapshot을 실행 전·Codex 후·Claude 후·both 후에 비교하며, 차이는 즉시 fail-closed한다. console evidence는 단일 `{ schemaVersion, providers[] }` envelope로 provider별 `reachedStage`와 실제 누적 `invocationCount`, provider/version/non-identifying executable fingerprint, result/usage/cost/timing, normalized event count, one-way session hash, child count, sanitizer count, `repositoryUnchanged`만 허용하며(절대 `[]` 아님) prompt, stdout/stderr, credentials, identity, path/content/hash, full environment은 기록하지 않는다.
 
 ## 4. Runtime 위치
 

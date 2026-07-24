@@ -376,15 +376,15 @@ Critical·High 결과가 하나라도 남으면 출시를 차단한다.
 
 ### 9.1 실행 조건
 
-- P3/CI/기본 `pnpm test`에서는 실행하지 않으며, 별도 P4 validation worker만 `ORION_REAL_PROVIDER_TESTS=1`로 `pnpm test:providers`를 실행한다.
+- P3/CI/기본 `pnpm test`에서는 실행하지 않으며, 별도 사용자 승인을 받은 P4 validation worker만 `ORION_REAL_PROVIDER_TESTS=1`로 `pnpm test:providers`를 실행한다. 실제 호출 전에 `pnpm test:providers grant`(0 provider call)로 하나의 `ORION_PROVIDER_AUTHORIZATION_ID`를 operator가 선택한 model에 묶는 1회용 grant를 발급한다.
 - 두 CLI login status와 trusted absolute native `ORION_CODEX_EXECUTABLE`/`ORION_CLAUDE_EXECUTABLE`를 P4가 먼저 확인한다.
 - harness가 source repository 밖에 만든 synthetic public temporary Git repository만 사용한다. 실제 회사 repository, web lookup, write tool, retry, fallback, resume은 금지한다.
-- Codex는 정확히 한 번 `exec --json --sandbox read-only --cd <repo> --output-schema <schema> --model <approved> -`를 실행하고, Claude는 정확히 한 번 `--print --output-format stream-json --verbose --json-schema <schema> --model sonnet --effort low --permission-mode dontAsk --allowedTools Read,Glob,Grep --disallowedTools Bash,Edit,Write,WebFetch,WebSearch --max-budget-usd 0.50`를 실행한다. 둘 다 `shell:false`, stdin prompt, invocation별 5분 timeout이다.
+- Codex는 정확히 한 번 `exec --json --sandbox read-only --cd <repo> --output-schema <file> --model <approved> -`를 실행하고, Claude는 정확히 한 번 `--print --output-format stream-json --verbose --json-schema <serialized JSON string> --model <approved(default sonnet)> --effort low --permission-mode dontAsk --allowedTools Read,Glob,Grep --disallowedTools Bash,Edit,Write,WebFetch,WebSearch --max-budget-usd 0.50`를 실행한다. 둘 다 `shell:false`, stdin prompt, invocation별 5분 timeout이다. 저장소 밖 durable ledger가 spawn 전에 1회용 run claim과 provider별 단일 slot을 예약하므로 crash·재실행은 추가 spawn을 0회로 만든다.
 
 ### 9.2 불변성 및 evidence
 
 - GitReadRunner 방식의 private HEAD/index/tracked/untracked/file-tree snapshot을 첫 실행 전, Codex 후, Claude 후, 둘 다 끝난 후에 비교한다. 차이는 fail-closed이며 그 뒤 provider 실행, retry, fallback을 하지 않는다.
-- evidence는 provider, CLI version, executable basename/fingerprint, invocation count, reported model, permission/sandbox mode, start/end/duration, exit class, normalized event counts, one-way session-ID hash, strict result, `repositoryUnchanged`, child-process count, usage/cost, sanitizer finding count만 포함한다.
+- evidence는 단일 `{ schemaVersion, providers[] }` envelope이며(절대 `[]` 아님) provider별 `reachedStage`, 실제 누적 `invocationCount`, CLI version, executable basename/fingerprint, reported model, permission/sandbox mode, start/end/duration, exit class, normalized event counts, one-way session-ID hash, strict result, `repositoryUnchanged`, child-process count, usage/cost, sanitizer finding count만 포함한다.
 - prompt, stdout/stderr, token/auth/account/email/org, executable search path, repository path/content/hash/manifest, full environment, transcript은 evidence·log·report에 저장하지 않는다.
 ## 10. 증거와 리포트
 

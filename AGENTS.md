@@ -54,7 +54,7 @@ M0 will provide these root commands in `package.json` during S1-S8. They do **no
 - `pnpm e2e`
 - `pnpm dev`
 - `pnpm start`
-- `pnpm test:providers` (P4 only; requires explicit `ORION_REAL_PROVIDER_TESTS=1` and is never part of `pnpm test` or CI)
+- `pnpm test:providers` (P4 only; requires explicit `ORION_REAL_PROVIDER_TESTS=1`; never part of `pnpm test` or CI). A real smoke also requires separate explicit user authorization and a one-time grant issued by `pnpm test:providers grant` (0 provider calls). The grant binds one `ORION_PROVIDER_AUTHORIZATION_ID` to operator-selected models; a durable ledger stored **outside** any repository reserves each provider's single invocation slot before spawn so crashes and reruns never re-invoke. Evidence is one sanitized `{ schemaVersion, providers[] }` envelope with `reachedStage` and a real cumulative `invocationCount` (never `[]`).
 
 `pnpm typecheck`, `pnpm test`, and `pnpm test:coverage` are self-contained after install: each prepares the required workspace package outputs with explicit prerequisite chaining and does not require an earlier manual `pnpm build` or pre/post lifecycle hook. `pnpm build` remains required before `pnpm smoke:workspace-import` and production start.
 
