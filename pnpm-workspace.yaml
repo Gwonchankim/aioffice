@@ -4,3 +4,8 @@ packages:
   - scripts
 allowBuilds:
   esbuild: true
+overrides:
+  # Security: pin the transitive fastify router to the patched version for
+  # GHSA-c96f-x56v-gq3h (find-my-way HTTP/2 DDoS). Newly-disclosed advisory
+  # against the inherited pin; not introduced by this correction.
+  'find-my-way@<9.6.1': '>=9.6.1'
