@@ -19,7 +19,7 @@ export const taskTransitionTable = {
   running: ['waiting_approval', 'succeeded', 'failed', 'cancelled', 'limit_reached'],
   waiting_approval: ['queued', 'cancelled', 'failed', 'limit_reached'],
   succeeded: [],
-  failed: [],
+  failed: ['queued'], // M3 DEC-015 manual retry
   cancelled: [],
   limit_reached: [],
 } as const satisfies TransitionTable<TaskStatus>;
@@ -32,7 +32,7 @@ export const stepTransitionTable = {
   waiting_approval: ['ready', 'cancelled', 'failed'],
   interrupted: ['ready', 'failed', 'cancelled'],
   succeeded: [],
-  failed: [],
+  failed: ['ready'], // M3 DEC-015 manual retry
   skipped: [],
   cancelled: [],
 } as const satisfies TransitionTable<StepStatus>;

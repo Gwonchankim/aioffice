@@ -35,7 +35,7 @@ const expectedTaskTransitions: Readonly<Record<TaskStatus, readonly TaskStatus[]
   running: ['waiting_approval', 'succeeded', 'failed', 'cancelled', 'limit_reached'],
   waiting_approval: ['queued', 'cancelled', 'failed', 'limit_reached'],
   succeeded: [],
-  failed: [],
+  failed: ['queued'], // M3 DEC-015 manual retry
   cancelled: [],
   limit_reached: [],
 };
@@ -60,7 +60,7 @@ const expectedStepTransitions: Readonly<Record<StepStatus, readonly StepStatus[]
   retry_wait: ['ready', 'failed', 'cancelled'],
   waiting_approval: ['ready', 'cancelled', 'failed'],
   succeeded: [],
-  failed: [],
+  failed: ['ready'], // M3 DEC-015 manual retry
   skipped: [],
   cancelled: [],
   interrupted: ['ready', 'failed', 'cancelled'],

@@ -94,7 +94,7 @@ describe('M1 database repositories', () => {
     applyMigrations(handle.database);
     expect(
       handle.database.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get(),
-    ).toMatchObject({ count: 3 });
+    ).toMatchObject({ count: 5 });
     expect(
       handle.database
         .prepare('SELECT COUNT(*) AS count FROM agent_profiles WHERE enabled = 0')
@@ -276,7 +276,7 @@ describe('M1 database repositories', () => {
       waiting_approval: ['ready', 'cancelled', 'failed'],
       interrupted: ['ready', 'failed', 'cancelled'],
       succeeded: [],
-      failed: [],
+      failed: ['ready'], // M3 DEC-015 manual retry
       skipped: [],
       cancelled: [],
     };
