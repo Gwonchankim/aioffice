@@ -52,3 +52,46 @@ All fake/injected, 0 real calls: schema `items` on every array (1); `additionalP
 
 ## Acceptance / prohibitions
 P4 (independent): install/format/lint/typecheck/test/test:coverage(7 targets ≥80%)/build/workspace-import/E2E/axe 0/console 0/audit prod+high 0-0/OpenAPI drift/tracked-dist 0/no `.only`.`.skip`/0 real calls/0 real grant/ledger unchanged. NO real smoke, main integration, M3, push/PR/deploy, dependency change, or ledger/evidence mutation.
+
+## Rev2 — exact resolution of P2 round-1 findings
+
+### RB1 (BLOCKER) — drop `maxItems:0`; enforce emptiness with a smoke-local validator
+Anthropic structured outputs support only array `minItems` (0/1) and REJECT `maxItems` (and other array constraints). `maxItems:0` would make Claude reject the schema — reproducing CFG-006. Resolution (reviewer's "viable fallback"):
+- ONE shared `providerSmokeResultSchema` accepted by BOTH providers, WITHOUT `maxItems`: every array has a real non-empty `items` schema (incl. nested `changes.files: {type:'array', items:{type:'string'}}`); every object has `additionalProperties:false`; every object's `required` equals ALL of its property keys; nullable optional fields use `type:['string','null']` (4 union fields, under Anthropic's 16-union limit); `status` enum `['succeeded']`; NO `minLength`/`maxItems`/`format`.
+- Emptiness + success are enforced smoke-locally and authoritatively: new pure `smokeResultIsStrict(result): boolean` = `runResultSchema.safeParse(result).success && result.status==='succeeded' && findings/artifacts/changes/tests/risks are each length 0`. `inspectProviderFrame` sets `hasStrictResult` via `smokeResultIsStrict` (replacing the bare `runResultSchema.safeParse().success`). The prompt still requires empty arrays; a non-empty or non-succeeded result ⇒ not strict ⇒ FAIL.
+- Evaluation recorded (CFG-001 "검토"): `maxItems:0` is NOT cross-provider safe (Claude-unsupported); therefore omitted; emptiness is enforced locally. `schemaHash` still changes (arrays now carry items).
+
+### RB2 (MAJOR) — terminal failure gates success
+`summary.terminalFailure: boolean`. Set true on Codex `{type:'error'}` / `{type:'turn.failed'}` and Claude error result frames (`is_error:true` or error `subtype`). Final `strictResult = summary.hasStrictResult && !summary.terminalFailure`, computed in `invokeSmokeProvider` and fed to `classifyExit`. So exit 0 + a valid strict result but ALSO a terminal-failure frame ⇒ NOT succeeded. Tests: exit-0 mixed stream with each terminal frame form ⇒ strictResult false.
+
+### RB3 (MAJOR) — frozen diagnostic priority table (all 10 codes, bounded, deterministic)
+`classifyProviderDiagnostic(text): ProviderDiagnosticCode | undefined` — input sliced to ≤16384 chars, lowercased; FIRST match in this exact priority order wins; only the code is returned (matched raw discarded):
+1. `INVALID_MCP_CONFIG` — `mcpservers` | (`mcp` & (`config`|`server`)) | `invalid mcp`
+2. `INVALID_OUTPUT_SCHEMA` — `output schema`|`output-schema`|`json schema`|`json-schema`|`response_format`|`structured output`|`additionalproperties`|`maxitems`|(`schema` & (`invalid`|`unsupported`|`not supported`|`required`|`must`|`property`))
+3. `INVALID_ARGUMENT` — `unknown option`|`unknown flag`|`unrecognized`|`unexpected argument`|`invalid argument`|`invalid option`|`invalid flag`|`no such option`
+4. `MODEL_UNAVAILABLE` — `unknown model`|`no such model`|(`model` & (`not found`|`unavailable`|`does not exist`|`unknown`|`invalid`|`unsupported`|`not supported`|`deprecated`|`no access`))
+5. `AUTHENTICATION_FAILED` — `unauthenticated`|`unauthorized`|`authentication`|`not logged in`|`invalid api key`|`invalid token`|`login required`|`401`
+6. `PERMISSION_DENIED` — `permission denied`|`forbidden`|`not allowed`|`access denied`|`403`
+7. `RATE_LIMITED` — `rate limit`|`rate-limit`|`ratelimit`|`too many requests`|`quota`|`429`
+8. `NETWORK_UNAVAILABLE` — `econnrefused`|`etimedout`|`enotfound`|`network`|`dns`|`connection refused`|`offline`|`proxy`|`tls handshake`
+9. `PROVIDER_INTERNAL_ERROR` — `internal server error`|`internal error`|`500`|`502`|`503`|`504`|`panic`|`segfault`|`unexpected error`
+10. `UNKNOWN_PROVIDER_FAILURE` — non-empty text with no match.
+Final evidence diagnostic = `frameDiagnostic ?? stderrDiagnostic ?? (nonSuccess ? UNKNOWN_PROVIDER_FAILURE : undefined)`. stderr is accumulated in a transient bounded (≤16 KiB) LOCAL buffer, classified at stream end, then discarded (never in evidence). `ProviderSmokeEvidence.diagnostic?` + stored in the outcome ledger payload. No raw stderr/stdout/email/org/token/path retained.
+
+### RB4 (MAJOR) — legacy-policy regression (frozen gen-2 fixture, pre-mutation)
+Test with a FROZEN generation-2 policy `{argvPolicyVersion:2, schemaHash:<old>, promptHash:<old>, repositoryTemplateVersion:1}` (literal constants, NOT recomputed): assert each of `argvPolicyVersion`/`schemaHash`/`promptHash` differs from `computeLivePolicy()`, then run `runProviderSmoke` with a grant carrying that old policy ⇒ `policy_binding_mismatch` for both providers with ZERO claim/reserve/spawn/markSpawnAttempt/recordOutcome (assert the injected ledger recorded no claim/reservation/spawn/outcome). No fixture contains the real spent authorization id.
+
+### RB5 (MINOR) — prompt read-only allowlist
+Prompt positively permits ONLY read-only inspection via the configured Read/Glob/Grep tools; explicitly prohibits Edit/Write, Bash/shell/git, web/network, running tests, and artifact creation. Output contract exactly matches the schema (status succeeded; summary = file count + detected languages; five empty arrays; handoff = read-only confirmation).
+
+### RB6 (MINOR) — precise fixtures + read-only preservation audit
+- Two distinct negative fixtures: (a) a Zod-invalid sample (e.g. empty `summary`, or `findings:[{}]`) rejected by `runResultSchema`; (b) a smoke-invalid but Zod-valid non-empty RunResult (e.g. `risks:['x']`) rejected by `smokeResultIsStrict` (empty-array contract) even though Zod accepts it.
+- CFG §4 item 24 (spent authorization preserved) is a P4 READ-ONLY diff/hash audit of `M2-SMOKE-20260724-001` ledger + prior evidence (unchanged), NOT a fake test, and NO fixture contains/accesses that id.
+
+### Test-migration list (adopted)
+- `InMemoryLedger` in scripts/test/provider-smoke.test.ts captures the FULL sanitized `recordOutcome` payload (not only provider/ordinal) so diagnostic persistence + raw-data-absence are assertable.
+- `fakeProcess` extended to inject stderr chunks and mixed stdout terminal-error frames (fully fake).
+- SMG-008 claude argv assertion `'{}'` → `'{"mcpServers":{}}'` (+ assert no bare `'{}'` element; retain `--strict-mcp-config`).
+- Add explicit numbered cases: INVALID_ARGUMENT, PROVIDER_INTERNAL_ERROR, precedence/overlap, exactly-16 KiB and over-limit input, terminal-error-plus-valid-result (exit 0 ⇒ FAIL), outcome serialization + no-raw.
+- README.md/AGENTS.md `--mcp-config {}` → `{"mcpServers":{}}`.
+- The shared-normalizer assertion (codex `error`/`turn.failed` ⇒ unknown) is NOT migrated; smoke-local handling is additive; the full server adapter/normalizer suite must stay green.
