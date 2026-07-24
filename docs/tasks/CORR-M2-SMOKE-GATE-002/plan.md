@@ -76,3 +76,47 @@ No `codex exec`/`codex exec resume`/`claude -p`/`claude --print`/`pnpm test:prov
 
 ## Exit
 `CORR_M2_SMOKE_GATE_READY_FOR_AUTHORIZATION`; STOP; await explicit real-smoke authorization (exactly 1 Codex + 1 Claude) AND separate main-integration authorization.
+
+## Rev2 — exact resolution of P2 round-1 blockers (supersedes ambiguous v1 wording)
+
+### RB1 Canonical run-time policy re-projection (fixes SMG-002/003 drift)
+`computeLivePolicy()` derives, from the CURRENT code, `{ argvPolicyVersion:2, schemaHash:sha256(JSON.stringify(providerSmokeResultSchema)), promptHash:sha256(smokePrompt), repositoryTemplateVersion:1 }`. At GRANT time the smoke writes this projection into `grant.options`. At RUN time the smoke recomputes `computeLivePolicy()` and compares EVERY field to the persisted grant; any mismatch ⇒ reachedStage `policy_binding_mismatch`, `errorCode:'POLICY_BINDING_MISMATCH'`, **0 spawn**. Field-by-field tamper tests (each of the 4 policy fields + each option constant).
+
+### RB2 Monotonic partial-evidence state machine (fixes SMG-004/006/007)
+`runProviderSmoke` accumulates a `ProviderSmokeEvidence[]` incrementally; a failure in any later step (snapshot exception, ledger op, cleanup) NEVER discards an already-pushed provider entry — the final envelope contains every entry produced so far, padded to both providers with the correct fail-closed stage. Per-step try/catch maps each failure to a sanitized code + stage:
+- snapshot read throws / returns unknown ⇒ treat as CHANGED (fail-closed) ⇒ current provider still recorded; subsequent provider ⇒ `security_halt`, 0 spawn.
+- `ledger.usage()` recount throws ⇒ report `max(inMemoryLowerBound, 0)` (a written `.spawn` marker sets the in-memory lower bound to ≥1) — never below a confirmed transition.
+- `markSpawnAttempt`/`recordOutcome` failure ⇒ sanitized code, evidence preserved, no re-invocation.
+
+### RB3 Per-run resource ownership above preparation (fixes SMG-005)
+A `ResourceTracker` (`{ track(dir), cleanup(): Promise<'complete'|'incomplete'> }`) is created in `runDeferredProviderSmoke` BEFORE `prepareRepository`. `prepareRepository` registers the runtime dir and synthetic repo into the tracker IMMEDIATELY after each `mkdtemp`, so a throw mid-preparation still leaves both dirs tracked. `runDeferredProviderSmoke` cleans the tracker in a `finally` (bounded EBUSY retry, only tracked run dirs, never broad OS temp), setting envelope `cleanup:'complete'|'incomplete'`. Cleanup runs after the run envelope is built and NEVER overwrites provider evidence. `SmokeRepository.cleanup` is replaced by the outer tracker.
+
+### RB4 Just-in-time per-provider executable recheck (fixes SMG-002 window)
+For EACH provider, immediately before `markSpawnAttempt` + `processPort.spawn`, the run re-resolves the trusted executable, recomputes the content fingerprint + `--version`, and compares basename + fingerprint + cliVersion to that provider's grant binding. Mismatch ⇒ `executable_binding_mismatch`, `errorCode:'EXECUTABLE_BINDING_MISMATCH'`, **0 spawn** (no `.spawn` marker), reserved slot fail-closed. The exact re-resolved executable path (never leaked to evidence) is the one launched. Test: executable swapped between the Codex and Claude steps ⇒ Codex spawns, Claude mismatch 0 spawn.
+
+### RB5 Injectable deferred + CLI seams (fixes SMG-004/010 verifiability)
+- `runDeferredProviderSmoke(overrides?: Partial<DeferredSmokeDependencies>)` where `DeferredSmokeDependencies = { environment, loadRuntime, bindingProbe, ledgerFactory, resourceTracker, processPort, prepareRepository, now }`. Production defaults wire the real hardened runtime; tests inject fakes ⇒ every exceptional branch (runtime-load throw, resolve throw, prepare throw, snapshot throw, ledger error, missing env) is fake-testable with 0 real calls.
+- `runSmokeCli(argv, deps: { environment, runGrant, runSmoke, stdout, setExitCode })` isolates dispatch (`grant` vs run vs opt-in-guard) with a TOP-LEVEL sanitized catch: it ALWAYS writes a structured object and sets an exit code; it NEVER throws, prints `[]`, or leaks a raw exception. The production entrypoint calls `runSmokeCli(process.argv.slice(2), realCliDeps)`.
+
+### RB6 Grant-mode envelope (fixes SMG-004 ambiguity)
+Grant mode emits its OWN sanitized structured envelope (NOT the providers-run array): success `{ schemaVersion:1, mode:'grant', result:'granted'|'idempotent', authorizationId, providers:{ openai:{model,binding}, anthropic:{model,binding} }, policy }` (bindings/policy already sanitized: no raw path); failure `{ schemaVersion:1, mode:'grant', result:'error', errorCode }`. Never `[]`, never a raw exception. The run mode keeps `{ schemaVersion:1, providers:[...], cleanup }`. Exact CLI tests for both modes + the opt-in guard.
+
+### RB7 Strict per-field grant validators (fixes SMG-003)
+`parseGrant` validates a RECURSIVE exact key set and precise formats; any unknown key at any level, any format/range violation ⇒ `PROVIDER_GRANT_CORRUPT`/`INVALID` ⇒ 0 spawn:
+- root keys exactly `{schemaVersion,authorizationId,createdAt,providers,options}`; `schemaVersion===2`; `createdAt` = strict ISO-8601 UTC; `authorizationId` matches the id regex.
+- `providers` keys exactly `{openai,anthropic}`; each terms keys exactly `{model,maxInvocations,binding}`; `maxInvocations===1`; `model` matches MODEL_IDENTIFIER.
+- `binding` keys exactly `{provider,cliVersion,executableBasename,executableFingerprint,model}`; `provider===key`; `model===terms.model`; `cliVersion` = dotted numeric; `executableBasename` = `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` (no separators/no path); `executableFingerprint` = `^[a-f0-9]{64}$`.
+- `options` keys exactly `{codexSandbox,claudePermissionMode,effort,allowedTools,disallowedTools,timeoutMs,maxBudgetUsd,argvPolicyVersion,schemaHash,promptHash,repositoryTemplateVersion}`; `codexSandbox==='read-only'`; `claudePermissionMode==='dontAsk'`; `effort==='low'`; tools exact; `timeoutMs` in [1000, 600000]; `maxBudgetUsd` in (0, 5]; `argvPolicyVersion`/`repositoryTemplateVersion` positive safe ints; `schemaHash`/`promptHash` = hex64.
+Table-driven tamper tests: one case per field/unknown-key class.
+
+### RB8 Test-1 conflict rejection is mandatory (fixes SMG-001)
+Required test 1 splits into three: run env model ABSENT ⇒ grant model used; run env model EQUAL to grant ⇒ grant model used; run env model DIFFERENT ⇒ `MODEL_BINDING_CONFLICT`, 0 spawn / 0 process calls (not "either/or"). The run reads env models only to DETECT a conflict, never as the argv source.
+
+### RB9 cleanup completeness in the pass predicate (fixes SMG-005)
+`isSmokePass(envelope)` additionally requires `envelope.cleanup === 'complete'`. A run with successful providers but `cleanup:'incomplete'` is NOT a pass and the CLI exits nonzero; provider evidence is still preserved. Test both.
+
+### Adopted current-test migrations (from P2 round 1, verbatim)
+ledger test: v1→v2 GrantRequest/terms/binding/policy; `{granted,used}`→`{granted,reserved,spawnAttempts}` with reserve-vs-spawn crash distinction; corrupt-grant → every v2 tamper class. smoke test: v2 grant fixture + `markSpawnAttempt`; fakeRepository → resource/binding seams; exact argv arrays for the SMG-008 flags + `not.toContain('--max-turns')`; fingerprint = granted real-content digest (not basename hash); spawn-failure → post-marker state with spawnAttemptCount 1 / childProcessCount 0; envelope assertions include reservedCount/spawnAttemptCount/cleanup/expanded stages + no raw error text; drop `deps.models`, prove argv from grant + absent/equal/different env cases; rerun → spawn-attempt count; cleanup fixture → valid two-provider envelope + `cleanup:'incomplete'` non-pass + exact owned paths; GrantIssuer capture → v2 bindings/policy + injected fingerprint + exact `['--version']` probe + fake process rejects model argv; repo-mutation → orchestration assertions (Codex `repository_changed`, Claude reserved-but-0-spawn, final-snapshot mutation classified).
+
+### New reachedStage additions
+`policy_binding_mismatch | executable_binding_mismatch | model_binding_conflict | security_halt` added to `SmokeReachedStage`. Evidence gains `reservedCount`, `spawnAttemptCount`; `invocationCount` is documented as the cumulative spawn-attempt count. Envelope gains `cleanup:'complete'|'incomplete'|'not_reached'` and (grant mode) the separate grant envelope.
