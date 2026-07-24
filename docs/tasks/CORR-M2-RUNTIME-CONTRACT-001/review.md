@@ -37,4 +37,13 @@
   7. Missing migrations/docs (both model constants, extra doc files). → rev3 R7.
 
 ## Round 3
-- (recorded below after the confirmation review of rev3)
+- worker id: `2-P2-Confirm` | agent: architect (bundled) | model label: openai-codex/gpt-5.6-sol | duration ~5m45s. Input: plan.md rev3 + contract cross-check; 0 real provider calls (CONFIRMED).
+- verdict: **CHANGES_REQUESTED** with R3 + R7 RESOLVED; 4 narrow contract refinements remained → adopted verbatim as plan.md rev4 (D1–D5):
+  1. claim-denied `invocationCount` must reflect real durable markers, not forced 0. → D1: always fresh marker count.
+  2. raw identity components unbounded/unvalidated. → D2: `composeFrameIdentity` validates the final composite vs the identity regex; invalid ⇒ invalidMapping.
+  3. identifier-less `turn.completed` could double-emit. → D3: literal `turn.completed` / `result:<uuid>` dedup identity.
+  4. absent Claude `retry_delay_ms` had no mapping to required `delayMs`. → D4: retry only when attempt+delay present, else unknown.
+  5. grant equality included generated `createdAt`. → D5: semantic-projection equality excluding createdAt.
+
+## Round 4 (final confirmation)
+- (recorded below)
