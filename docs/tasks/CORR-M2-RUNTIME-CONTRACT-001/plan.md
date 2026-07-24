@@ -95,3 +95,43 @@ No `ORION_REAL_PROVIDER_TESTS`; no `pnpm test:providers`/`codex exec`/`codex exe
 
 ## Exit
 Final state `CORR_M2_RUNTIME_CONTRACT_READY_FOR_SMOKE_AUTHORIZATION`; STOP; await (a) explicit real-smoke authorization and (b) explicit main-integration authorization.
+
+## Rev3 — exact resolution of P2 round-2 required changes (supersedes ambiguous rev2 wording)
+
+### R1 Composite identity/dedup (fixes B4; regex-safe)
+`providerEventIdentitySchema = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/` — **`#` is forbidden**; use colon-only IDs.
+- Codex frame identity (= `ProviderFrameMapping.providerEventId`, used for parser dedup): `thread.started:<thread_id>` (session), `item.started:<item.id>`, `item.completed:<item.id>`, `turn.completed` (usage; no id ⇒ identity omitted, allowed once via createEvents), `system.api_retry` (omit id). Start and completion of one item stay DISTINCT (`item.started:<id>` ≠ `item.completed:<id>`).
+- Claude frame identity = the frame's TOP-LEVEL `uuid` (NOT `message.id`, which several assistant messages in one turn can share): `system:<uuid>`, `assistant:<uuid>`, `user:<uuid>`, `result:<uuid>`, `retry:<uuid>`.
+- Per-event `providerEventId` inside `createEvents` (regex-safe, unique): `assistant:<uuid>:<blockIndex>` (text), `assistant:<uuid>:tool:<blockIndex>` (tool_use), `user:<uuid>:<blockIndex>` (tool_result). Codex event ids reuse the frame identity (single event per codex frame).
+- Frames lacking a required identity field ⇒ `invalidMapping()`.
+- Tests: same `message.id` under different frame `uuid` both accepted; duplicate identical `uuid` dropped before `createEvents`; multi-block assistant emits ordered text+tool; Codex `item.started`/`item.completed` sharing `item.id` both accepted; every generated id parses through `normalizedAdapterEventSchema`.
+
+### R2 Authoritative wire additions (fixes B1 completeness)
+- Codex `command_execution.status`: `in_progress|completed|failed|declined` — `completed`→succeeded, `failed`/`declined`→failed.
+- Codex usage keys: `input_tokens`,`cached_input_tokens`(→cacheTokens),`output_tokens`; no duration.
+- Claude retry frame: real field `retry_delay_ms` (not `delay_ms`); tolerated if absent. Claude top-level `uuid` present on stream frames; unknown/unsupported content-block types ⇒ ignored (not invalid) so a text/tool frame with an extra block still yields its known events.
+- Normalizer tests cover declined status, cached_input_tokens, retry_delay_ms, and unknown content-block tolerance.
+
+### R3 Dedup-safe tool duration (fixes B4 timing)
+Duration state is mutated ONLY inside the accepted mapping's `createEvents` callback (which runs after `IncrementalLineParser.acceptIdentity()`), never during `mapFrame`. Per-run closure `Map<toolId,{startedAt,toolName}>`: toolStarted's createEvents sets `{startedAt: now(), toolName}`; toolCompleted's createEvents samples `now()` once, `durationMs = max(0, now - startedAt)` (or `0` when no accepted start), then deletes the entry. Tests: exact deterministic duration via injected `now`; completion-without-start ⇒ 0; duplicate start/completion frames don't corrupt timing; Claude tool-name correlation via `tool_use_id`.
+
+### R4 One-time authId semantics (fixes B3) — run-claim + per-slot markers, reserve-all-before-first-spawn
+- Grant fixes `maxInvocations = 1` per provider (authorized smoke scope: exactly 1 Codex + 1 Claude).
+- `claimRun(authId)`: `wx`-create `<authId>/run.claim`. If it already exists ⇒ return `null` ⇒ the ENTIRE run performs **0 spawn** (covers rerun/partial/early-return/crash — the claim persists). Atomic one-time gate.
+- After a successful claim, reserve BOTH provider slots (`wx`-create `<authId>/slots/<provider>-1.slot`) BEFORE spawning EITHER provider. A concurrent-race loser on the claim performs 0 spawn.
+- Crash after claim (even before Codex) ⇒ `run.claim` persists ⇒ rerun 0 spawn. Early Codex failure / repository-change return ⇒ claim already consumed ⇒ Claude slot cannot be revived on rerun.
+- `usage(authId)`: cumulative used per provider = fresh count of that provider's `.slot` markers at assembly (0 or 1); total = sum.
+- Fake-port end-to-end tests: full rerun ⇒ 0 spawn; crash after claim; crash after first provider; early repository-change return; two concurrent harness runners (only one claims).
+
+### R5 Grant workflow + Windows containment (fixes B2/B3 major)
+- Grant JSON (strict, canonical sorted-key serialization for equality): `{ schemaVersion:1, authorizationId, createdAt, providers:{ openai:{model,maxInvocations:1}, anthropic:{model,maxInvocations:1} }, options:{ codexSandbox:'read-only', claudePermissionMode:'dontAsk', effort:'low', allowedTools:'Read,Glob,Grep', disallowedTools:'Bash,Edit,Write,WebFetch,WebSearch', timeoutMs:300000, maxBudgetUsd:0.5 } }`. Models mandatory, `validateProviderModel`-shaped; options immutable constants (re-grant with different terms ⇒ `PROVIDER_GRANT_CONFLICT`; identical ⇒ idempotent).
+- Zero-provider-call issuance: `provider-smoke.ts` CLI dispatches `argv[2]`: `grant` (writes grant only; 0 spawn) vs `run`/default (claim+reserve+spawn). Inputs via env `ORION_PROVIDER_AUTHORIZATION_ID`, `ORION_CODEX_SMOKE_MODEL`, `ORION_CLAUDE_SMOKE_MODEL`. No new root package script (reuse `test:providers` entry + documented mode arg).
+- Windows ledger-dir containment `assertSafeLedgerRoot(dir, forbiddenRoots)`: require local drive-letter absolute; reject UNC (`\\`), device (`\\?\`,`\\.\`), ADS/`:`-in-segment; canonicalize nearest EXISTING ancestor (`realpathSync.native`); `lstat` each existing component, reject symlink/reparse; reject if canonical path is contained (case-insensitive) in any `forbiddenRoot` (workspace root + git worktree roots + `.orion`/`.gjc`); create dirs `{recursive,mode:0o700}`; REVALIDATE after creation and before grant/reserve/usage. Same-user path-swap TOCTOU acknowledged as outside Node guarantees. Tests: unsafe default/override, junction ancestor, non-existent override, post-create reparse, case-insensitive containment.
+
+### R6 One evidence envelope (fixes B5)
+Single strict top-level shape on EVERY path: `{ schemaVersion:1, providers: ProviderEvidence[] }`. `ProviderEvidence`: required `provider`, `reachedStage` (`authorization_missing|grant_missing|grant_corrupt|ledger_unsafe|run_claim_denied|authorization_exhausted|preflight_unavailable|invocation_reserved|invocation_spawned|invocation_completed|cleanup_incomplete`), required `invocationCount` (fresh marker count at assembly; `0` on no-auth/unsafe/corrupt/claim-denied), plus existing sanitized fields when reached. Already-produced provider evidence preserved when a later provider path fails. Each catch boundary maps to ONE generic sanitized error code + reachedStage. CLI ALWAYS prints this object and exits nonzero on any non-success; NEVER `[]`. Tests: every stage; concurrent-count; preserved-partial.
+
+### R7 Complete migrations + docs
+- Remove BOTH `CODEX_SMOKE_MODEL` and `CLAUDE_SMOKE_MODEL`; migrate `PROVIDER_SMOKE_MAX_INVOCATIONS`, `codexResumeArgv`, direct `invokeSmokeProvider` fixtures, provider-specific `expected.usage`/`standardUsage` (drop codex durationMs), and the generic `stdout.toContain('"result"')` assertion. Add exact Claude spawn-capture argv parity in the fixtures test.
+- Docs: `README.md`, `AGENTS.md`, `docs/orion/orion-console-operations-recovery-runbook.md`, `docs/orion/orion-console-test-evaluation-plan.md` (latter hardcodes `--model sonnet` + one-gate) — grant-issuance + authorization-ID + two-gate future-smoke + ledger-outside-repo.
+- P4 report: per-new-file coverage in addition to the aggregate 7-target gate.

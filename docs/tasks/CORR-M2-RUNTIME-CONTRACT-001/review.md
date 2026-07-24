@@ -26,4 +26,15 @@
 - new dedicated tests for normalizer + ledger (80% coverage targets).
 
 ## Round 2
-- (recorded below after the re-review of rev2)
+- worker id: `1-P2-Rereview` | agent: critic (bundled) | model label: openai-codex/gpt-5.6-sol | duration ~9m53s. Input: plan.md rev2 + source cross-check; 0 real provider calls (CONFIRMED).
+- verdict: **CHANGES_REQUESTED**. Remaining issues → resolved in plan.md rev3 (see plan “Rev3 — exact resolution”):
+  1. Composite identity used `#` which `providerEventIdentitySchema` forbids; Claude `message.id` can repeat per turn. → rev3 R1: colon-only IDs, frame identity = top-level `uuid`, distinct codex start/completion ids.
+  2. Authoritative wire incomplete (Codex `declined` status; Claude `retry_delay_ms`/`uuid`; unknown-block tolerance). → rev3 R2.
+  3. Duration state could be corrupted by pre-dedup `mapFrame`. → rev3 R3: state mutated only inside accepted `createEvents`.
+  4. `maxInvocations>1` + just-in-time reservation didn't guarantee one-time authId. → rev3 R4: run-claim (`wx`) + reserve-all-before-first-spawn + maxInvocations=1.
+  5. Two output shapes / ambiguous cumulative count. → rev3 R6: single `{schemaVersion,providers[]}` envelope, required `invocationCount`=fresh marker count, never `[]`.
+  6. Grant schema/issuance + Windows containment underspecified. → rev3 R5: strict grant JSON, `grant` CLI mode, `assertSafeLedgerRoot` algorithm.
+  7. Missing migrations/docs (both model constants, extra doc files). → rev3 R7.
+
+## Round 3
+- (recorded below after the confirmation review of rev3)
