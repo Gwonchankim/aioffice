@@ -15,4 +15,8 @@ WORKFLOW_MODE: controller_isolated. Independent reviewers ran in isolated `task`
 - resolution: plan rev2 (RB1–RB6 + adopted test-migration list).
 
 ## Round 2 (confirmation)
+- worker id: `12-CFG-P2-Confirm` | agent: critic (bundled) | model label: openai-codex/gpt-5.6-sol | ~3m35s. 0 real provider calls (CONFIRMED).
+- verdict: **CHANGES_REQUESTED** — RB1, RB2, RB3, RB4, RB6 CLOSED; normalizer contract + authorization/evidence boundary confirmed clean. One new blocker (RB5): the shared prompt named Claude-only tools (`Read/Glob/Grep`), which Codex lacks (Codex inspects via `--sandbox read-only`) → could misdirect Codex. → resolved in plan rev3: provider-neutral prompt (no tool names) + per-provider argv read-only enforcement + one argv/prompt contract test per provider.
+
+## Round 3 (final confirmation)
 - (recorded below)
