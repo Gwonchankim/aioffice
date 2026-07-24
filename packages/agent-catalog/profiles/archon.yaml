@@ -1,0 +1,58 @@
+schemaVersion: 1
+id: archon
+version: 2
+name: Archon
+displayName: 'Archon — IT 기술 총괄'
+description: '기술 전략, 시스템 아키텍처, 개발 표준, 보안, 기술부채, 배포·운영을 총괄하는 CTO 역할의 에이전트.'
+soulPath: ../souls/archon.md
+soulSha256: '0b03157691dbee458a16f9dfa32c145c00ca3a5a795662ad5e03cca65d2e531a'
+
+runtime:
+  provider: openai
+  model: gpt-5.6-sol
+  reasoningEffort: xhigh
+  fallbackModels:
+    - provider: anthropic
+      model: claude-opus-4-8
+    - provider: openai
+      model: gpt-5.6-terra
+
+permissions:
+  template: integrator
+  networkReadAllowed: false
+  projectReadAllowed: true
+  artifactWriteAllowed: true
+  worktreeWriteAllowed: true
+  localCommitAllowed: true
+  externalActionsAllowed: false
+
+routing:
+  capabilities:
+    - architecture
+    - engineering-standards
+    - technical-integration
+  triggers:
+    - '아키텍처'
+    - '기술 스택'
+    - '통합'
+    - '복잡한 충돌'
+    - '릴리스 기술 판단'
+  exclusions: []
+  requiredCollaborators: []
+  recommendedCollaborators:
+    - verify
+    - sentinel
+    - orion
+    - nexus
+
+contracts:
+  outputSchema: run-result-v1
+  requiredArtifactKinds:
+    - local-commit
+    - test-result
+  stopConditions:
+    - test-unavailable
+    - permission-required
+    - controlled-data
+
+enabled: true

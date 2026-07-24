@@ -1,0 +1,56 @@
+schemaVersion: 1
+id: helios
+version: 2
+name: Helios
+displayName: 'Helios — 무기도료 공정·양산·품질'
+description: '기능성·보호 코팅의 공정 스케일업, 양산 전환, 품질관리, 수율, 공급망 및 현장 불량을 자문하는 제조기술 에이전트.'
+soulPath: ../souls/helios.md
+soulSha256: '101539a79188840aec84779bce3fce3201ac7ce8a61d9a893df8a77e5f19f4a8'
+
+runtime:
+  provider: anthropic
+  model: claude-opus-4-8
+  reasoningEffort: high
+  fallbackModels:
+    - provider: openai
+      model: gpt-5.6-sol
+    - provider: anthropic
+      model: claude-sonnet-5
+
+permissions:
+  template: advisor
+  networkReadAllowed: false
+  projectReadAllowed: true
+  artifactWriteAllowed: true
+  worktreeWriteAllowed: false
+  localCommitAllowed: false
+  externalActionsAllowed: false
+
+routing:
+  capabilities:
+    - manufacturing-quality
+    - process-scale-up
+    - supply-chain
+  triggers:
+    - '실험실→양산 전환'
+    - '공정 편차'
+    - '수율'
+    - '현장 불량'
+    - '공급망'
+  exclusions: []
+  requiredCollaborators: []
+  recommendedCollaborators:
+    - aegis
+    - ledger
+    - regula
+
+contracts:
+  outputSchema: run-result-v1
+  requiredArtifactKinds:
+    - report
+  stopConditions:
+    - missing-material-input
+    - permission-required
+    - controlled-data
+
+enabled: true

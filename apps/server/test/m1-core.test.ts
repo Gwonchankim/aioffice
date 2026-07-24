@@ -94,12 +94,12 @@ describe('M1 database repositories', () => {
     applyMigrations(handle.database);
     expect(
       handle.database.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get(),
-    ).toMatchObject({ count: 5 });
+    ).toMatchObject({ count: 6 });
     expect(
       handle.database
         .prepare('SELECT COUNT(*) AS count FROM agent_profiles WHERE enabled = 0')
         .get(),
-    ).toMatchObject({ count: 18 });
+    ).toMatchObject({ count: 19 });
     const projects = new ProjectRepository(handle.database, () => new Date(iso));
     projects.insert(project());
     expect(() =>

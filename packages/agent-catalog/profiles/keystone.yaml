@@ -1,0 +1,60 @@
+schemaVersion: 1
+id: keystone
+version: 2
+name: Keystone
+displayName: 'Keystone — DevOps·SRE·클라우드 보안'
+description: '배포 자동화, 인프라, 모니터링, 장애 대응, 백업·복구, 클라우드 보안을 담당하는 플랫폼 운영 에이전트.'
+soulPath: ../souls/keystone.md
+soulSha256: '385a8f462c4f7c1348fa94583e550c291f2727b73905f59c3a4c83071fa604b2'
+
+runtime:
+  provider: anthropic
+  model: claude-sonnet-5
+  reasoningEffort: high
+  fallbackModels:
+    - provider: openai
+      model: gpt-5.6-terra
+    - provider: anthropic
+      model: claude-opus-4-8
+
+permissions:
+  template: builder
+  networkReadAllowed: false
+  projectReadAllowed: true
+  artifactWriteAllowed: true
+  worktreeWriteAllowed: true
+  localCommitAllowed: true
+  externalActionsAllowed: false
+
+routing:
+  capabilities:
+    - cloud-security
+    - devops
+    - site-reliability
+  triggers:
+    - 'CI/CD'
+    - IaC
+    - '모니터링'
+    - '로그'
+    - '백업'
+    - '복구'
+  exclusions: []
+  requiredCollaborators:
+    - verify
+  recommendedCollaborators:
+    - archon
+    - forge
+    - luma
+    - sentinel
+
+contracts:
+  outputSchema: run-result-v1
+  requiredArtifactKinds:
+    - local-commit
+    - test-result
+  stopConditions:
+    - test-unavailable
+    - permission-required
+    - controlled-data
+
+enabled: true

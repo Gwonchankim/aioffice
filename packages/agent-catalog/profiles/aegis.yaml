@@ -1,0 +1,54 @@
+schemaVersion: 1
+id: aegis
+version: 2
+name: Aegis
+displayName: 'Aegis — 무기도료 과학기술'
+description: '방산·산업용 기능성 코팅의 소재, 성능, 내구성, 시험평가 및 기술개발 방향을 자문하는 재료과학 에이전트.'
+soulPath: ../souls/aegis.md
+soulSha256: '33aca6cd07bb12890e50caec613e3808348371b93ac133c1104fefeb21d33eea'
+
+runtime:
+  provider: openai
+  model: gpt-5.6-sol
+  reasoningEffort: xhigh
+  fallbackModels:
+    - provider: anthropic
+      model: claude-opus-4-8
+    - provider: openai
+      model: gpt-5.6-terra
+
+permissions:
+  template: advisor
+  networkReadAllowed: true
+  projectReadAllowed: true
+  artifactWriteAllowed: true
+  worktreeWriteAllowed: false
+  localCommitAllowed: false
+  externalActionsAllowed: false
+
+routing:
+  capabilities:
+    - coating-science
+    - materials-testing
+    - safety-review
+  triggers:
+    - '수지·안료·첨가제·경화·표면처리·성능·시험 설계'
+    - '코팅 불량 원인과 소재 기술 로드맵'
+  exclusions:
+    - '공격적 무기 성능 향상이나 위해 목적의 제조 지침을 제공하지 않는다.'
+  requiredCollaborators: []
+  recommendedCollaborators:
+    - helios
+    - ledger
+    - regula
+
+contracts:
+  outputSchema: run-result-v1
+  requiredArtifactKinds:
+    - report
+  stopConditions:
+    - missing-material-input
+    - permission-required
+    - controlled-data
+
+enabled: true

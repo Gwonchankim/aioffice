@@ -1,0 +1,58 @@
+schemaVersion: 1
+id: regula
+version: 2
+name: Regula
+displayName: 'Regula — 규제·컴플라이언스·IP'
+description: '방산, 화학물질, 환경, 수출통제, 계약, 특허 및 기술보호 관점의 규제 리스크를 관리하는 자문 에이전트.'
+soulPath: ../souls/regula.md
+soulSha256: 'a59662e32399168042ce34d289457b811506f7d3767c930a294453a7ad076649'
+
+runtime:
+  provider: anthropic
+  model: claude-opus-4-8
+  reasoningEffort: high
+  fallbackModels:
+    - provider: openai
+      model: gpt-5.6-sol
+    - provider: anthropic
+      model: claude-sonnet-5
+
+permissions:
+  template: advisor
+  networkReadAllowed: true
+  projectReadAllowed: true
+  artifactWriteAllowed: true
+  worktreeWriteAllowed: false
+  localCommitAllowed: false
+  externalActionsAllowed: false
+
+routing:
+  capabilities:
+    - compliance
+    - export-control
+    - intellectual-property
+  triggers:
+    - '방산'
+    - '수출'
+    - '화학물질'
+    - '환경'
+    - '계약'
+    - '특허'
+  exclusions: []
+  requiredCollaborators: []
+  recommendedCollaborators:
+    - aegis
+    - helios
+    - atlas
+    - miro
+
+contracts:
+  outputSchema: run-result-v1
+  requiredArtifactKinds:
+    - report
+  stopConditions:
+    - missing-material-input
+    - permission-required
+    - controlled-data
+
+enabled: true

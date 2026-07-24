@@ -1,0 +1,56 @@
+schemaVersion: 1
+id: verify
+version: 2
+name: Verify
+displayName: 'Verify — 기능·자동화 QA'
+description: '기능 요구사항 검증, 인수 기준, 회귀 테스트 및 테스트 자동화를 담당하는 품질보증 에이전트.'
+soulPath: ../souls/verify.md
+soulSha256: '5dc58a5504895f9f2fae47ff56aa330f2af076be76c95372e1b3a5552f35994e'
+
+runtime:
+  provider: openai
+  model: gpt-5.6-terra
+  reasoningEffort: high
+  fallbackModels:
+    - provider: anthropic
+      model: claude-sonnet-5
+    - provider: openai
+      model: gpt-5.6-sol
+
+permissions:
+  template: qa_writer
+  networkReadAllowed: false
+  projectReadAllowed: true
+  artifactWriteAllowed: true
+  worktreeWriteAllowed: true
+  localCommitAllowed: true
+  externalActionsAllowed: false
+
+routing:
+  capabilities:
+    - acceptance-testing
+    - automation-qa
+    - regression-testing
+  triggers:
+    - '모든 코드 변경'
+    - '버그 수정'
+    - '회귀 위험'
+    - '릴리스 판단'
+  exclusions: []
+  requiredCollaborators: []
+  recommendedCollaborators:
+    - forge
+    - luma
+    - sentinel
+    - archon
+
+contracts:
+  outputSchema: run-result-v1
+  requiredArtifactKinds:
+    - test-result
+  stopConditions:
+    - test-unavailable
+    - permission-required
+    - controlled-data
+
+enabled: true

@@ -1,0 +1,60 @@
+schemaVersion: 1
+id: forge
+version: 2
+name: Forge
+displayName: 'Forge — 백엔드 개발'
+description: '확장성과 보안을 갖춘 서버, API, 데이터베이스, 인증, 외부 연동 및 백엔드 테스트를 설계·구현하는 개발 에이전트.'
+soulPath: ../souls/forge.md
+soulSha256: '4f96e49c0cd6431b5c5e2f803a98404cc20166e93b4bae473c1c8d0aac23789f'
+
+runtime:
+  provider: anthropic
+  model: claude-sonnet-5
+  reasoningEffort: high
+  fallbackModels:
+    - provider: openai
+      model: gpt-5.6-terra
+    - provider: anthropic
+      model: claude-opus-4-8
+
+permissions:
+  template: builder
+  networkReadAllowed: false
+  projectReadAllowed: true
+  artifactWriteAllowed: true
+  worktreeWriteAllowed: true
+  localCommitAllowed: true
+  externalActionsAllowed: false
+
+routing:
+  capabilities:
+    - api-development
+    - backend-engineering
+    - database-design
+  triggers:
+    - '서버'
+    - API
+    - DB
+    - '인증'
+    - '백그라운드 작업'
+    - '백엔드 버그'
+  exclusions: []
+  requiredCollaborators:
+    - verify
+  recommendedCollaborators:
+    - luma
+    - keystone
+    - sentinel
+    - archon
+
+contracts:
+  outputSchema: run-result-v1
+  requiredArtifactKinds:
+    - local-commit
+    - test-result
+  stopConditions:
+    - test-unavailable
+    - permission-required
+    - controlled-data
+
+enabled: true

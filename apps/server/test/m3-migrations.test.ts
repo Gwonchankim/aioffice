@@ -79,12 +79,12 @@ function insertTaskAndStep(
 }
 
 describe('M3 migrations 0004/0005', () => {
-  it('applies exactly 5 forward migrations and re-applies as a no-op', () => {
+  it('applies exactly 6 forward migrations and re-applies as a no-op', () => {
     const handle = setup();
     applyMigrations(handle.database);
     expect(
       handle.database.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get(),
-    ).toMatchObject({ count: 5 });
+    ).toMatchObject({ count: 6 });
     const before = handle.database
       .prepare('SELECT version, name, checksum FROM schema_migrations ORDER BY version')
       .all();
@@ -154,13 +154,13 @@ describe('M3 migrations 0004/0005', () => {
       handle.database
         .prepare(
           `INSERT INTO agent_profiles (id, version, seed_order, config_sha256, config_json, enabled, execution_mode, created_at)
-          VALUES ('atlas', 2, 99, ?, '{"id":"atlas"}', 1, 'full', ?)`,
+          VALUES ('atlas', 3, 99, ?, '{"id":"atlas"}', 1, 'full', ?)`,
         )
         .run('f'.repeat(64), iso),
     ).toThrow(/SEED_ORDER_MISMATCH/);
     expect(
       handle.database
-        .prepare("SELECT COUNT(*) AS count FROM agent_profiles WHERE id = 'atlas' AND version = 2")
+        .prepare("SELECT COUNT(*) AS count FROM agent_profiles WHERE id = 'atlas' AND version = 3")
         .get(),
     ).toMatchObject({ count: 0 });
   });

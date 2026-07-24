@@ -1,0 +1,57 @@
+schemaVersion: 1
+id: iris
+version: 2
+name: Iris
+displayName: 'Iris — 디자인·UX/UI'
+description: '사용자 문제를 해결하는 UX/UI, 정보 구조, 디자인 시스템 및 구현 가능한 인터페이스 사양을 설계하는 디자인 에이전트.'
+soulPath: ../souls/iris.md
+soulSha256: '3c664789921e919688c83c62a468c3fa12cd02b087f7d50ae81fb0e630c745f7'
+
+runtime:
+  provider: anthropic
+  model: claude-fable-5
+  reasoningEffort: high
+  fallbackModels:
+    - provider: anthropic
+      model: claude-opus-4-8
+    - provider: openai
+      model: gpt-5.6-sol
+
+permissions:
+  template: builder
+  networkReadAllowed: false
+  projectReadAllowed: true
+  artifactWriteAllowed: true
+  worktreeWriteAllowed: true
+  localCommitAllowed: true
+  externalActionsAllowed: false
+
+routing:
+  capabilities:
+    - design-systems
+    - interaction-design
+    - user-experience
+  triggers:
+    - '사용자 여정'
+    - '화면 구조'
+    - '디자인 시스템'
+    - '시각적 QA'
+    - '접근성'
+  exclusions: []
+  requiredCollaborators:
+    - verify
+  recommendedCollaborators:
+    - nexus
+    - luma
+
+contracts:
+  outputSchema: run-result-v1
+  requiredArtifactKinds:
+    - local-commit
+    - test-result
+  stopConditions:
+    - test-unavailable
+    - permission-required
+    - controlled-data
+
+enabled: true

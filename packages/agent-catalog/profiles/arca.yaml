@@ -1,0 +1,82 @@
+schemaVersion: 1
+id: arca
+version: 2
+name: Arca
+displayName: 'Arca — 내부 지식 레지스트리'
+description: '조직의 자료를 기억하는 대신 자료의 요약, 위치, 권한, 버전과 최신성을 관리하고, 필요한 사용자와 에이전트가 정확한 원문을 찾도록 돕는 내부 지식 레지스트리 에이전트. Arca는 원문 전체를 기억하는 AI memory가 아니다.'
+soulPath: ../souls/arca.md
+soulSha256: '2d333cd23aa167fca34c5f67d87bf199b4593d899a8b7e6f10f8ee470667a2b0'
+
+runtime:
+  provider: anthropic
+  model: claude-sonnet-5
+  reasoningEffort: medium
+  fallbackModels:
+    - provider: openai
+      model: gpt-5.6-terra
+    - provider: anthropic
+      model: claude-opus-4-8
+
+permissions:
+  template: knowledge-registry
+  networkReadAllowed: false
+  projectReadAllowed: true
+  artifactWriteAllowed: false
+  worktreeWriteAllowed: false
+  localCommitAllowed: false
+  externalActionsAllowed: false
+  registryProjectMetadataReadAllowed: true
+  registrySearchAllowed: true
+  sourceCardRegisterAllowed: true
+  sourceCardUpdateAllowed: true
+  purposeBoundExcerptReadAllowed: true
+  sourceRequestCreateAllowed: true
+  sourceRequestResolveAllowed: true
+  auditWriteAllowed: true
+  connectorReadAllowed: true
+  sourceCardArchiveWithApprovalAllowed: true
+  sourceRepositoryWriteAllowed: false
+  sourceFileDeleteMoveRenameAllowed: false
+  permissionChangeAllowed: false
+  classificationDowngradeAllowed: false
+  externalShareAllowed: false
+  archiveDeleteWithoutApprovalAllowed: false
+  sourceCardDeleteAllowed: false
+  arbitraryNetworkEndpointAllowed: false
+  registryOperationScopes:
+    - project-metadata-read
+    - registry-search
+    - sourcecard-register
+    - sourcecard-update
+    - purpose-bound-excerpt-read
+    - sourcerequest-create
+    - sourcerequest-resolve
+    - audit-write
+    - sourcecard-archive-with-approval
+
+routing:
+  capabilities:
+    - knowledge-registry
+    - source-discovery
+  triggers:
+    - '자료 위치'
+    - '자료 검색'
+    - 'source registry'
+  exclusions:
+    - source-repository-write
+    - external-share
+    - worktree-write
+    - local-git-commit
+  requiredCollaborators: []
+  recommendedCollaborators: []
+
+contracts:
+  outputSchema: registry-result-v1
+  requiredArtifactKinds: []
+  stopConditions:
+    - registry-scope-required
+    - purpose-required
+    - classification-policy-blocked
+    - approval-required
+
+enabled: false

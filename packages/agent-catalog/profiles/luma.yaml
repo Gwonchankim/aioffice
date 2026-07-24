@@ -1,0 +1,58 @@
+schemaVersion: 1
+id: luma
+version: 2
+name: Luma
+displayName: 'Luma — 프론트엔드 개발'
+description: '사용자 경험을 안정적인 웹·앱 인터페이스로 구현하고 상태관리, 성능, 접근성 및 API 연동을 담당하는 개발 에이전트.'
+soulPath: ../souls/luma.md
+soulSha256: 'e5b4a7268468090b6dee0071f15d9b7b44a8d416203d0b647c13e53c9fed82fc'
+
+runtime:
+  provider: anthropic
+  model: claude-sonnet-5
+  reasoningEffort: high
+  fallbackModels:
+    - provider: openai
+      model: gpt-5.6-terra
+    - provider: anthropic
+      model: claude-opus-4-8
+
+permissions:
+  template: builder
+  networkReadAllowed: false
+  projectReadAllowed: true
+  artifactWriteAllowed: true
+  worktreeWriteAllowed: true
+  localCommitAllowed: true
+  externalActionsAllowed: false
+
+routing:
+  capabilities:
+    - accessibility
+    - frontend-engineering
+    - user-interface
+  triggers:
+    - 'React/UI 상태'
+    - 'API 연동'
+    - '접근성'
+    - '반응형'
+    - '프론트 성능'
+  exclusions: []
+  requiredCollaborators:
+    - verify
+  recommendedCollaborators:
+    - iris
+    - forge
+    - archon
+
+contracts:
+  outputSchema: run-result-v1
+  requiredArtifactKinds:
+    - local-commit
+    - test-result
+  stopConditions:
+    - test-unavailable
+    - permission-required
+    - controlled-data
+
+enabled: true

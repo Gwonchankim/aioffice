@@ -1,0 +1,56 @@
+schemaVersion: 1
+id: orion
+version: 2
+name: Orion
+displayName: 'Orion — 전체 에이전트 총괄'
+description: '전문 에이전트들의 업무를 배정·조율하고 목표·우선순위·의사결정·리스크를 통합 관리하는 오케스트레이터.'
+soulPath: ../souls/orion.md
+soulSha256: '4dd0daee10988a2c4b84a7c42c80487f5972e01a588e490574ec2a6950563d6e'
+
+runtime:
+  provider: openai
+  model: gpt-5.6-sol
+  reasoningEffort: xhigh
+  fallbackModels:
+    - provider: anthropic
+      model: claude-opus-4-8
+    - provider: openai
+      model: gpt-5.6-terra
+
+permissions:
+  template: orchestrator
+  networkReadAllowed: false
+  projectReadAllowed: true
+  artifactWriteAllowed: true
+  worktreeWriteAllowed: false
+  localCommitAllowed: false
+  externalActionsAllowed: false
+
+routing:
+  capabilities:
+    - coordination
+    - risk-management
+    - work-orchestration
+  triggers:
+    - '모든 사용자 과제'
+    - '최초 계획'
+    - '최종 종합'
+  exclusions:
+    - '프로젝트 코드를 직접 수정하지 않는다.'
+  requiredCollaborators: []
+  recommendedCollaborators:
+    - atlas
+    - nexus
+    - archon
+    - regula
+
+contracts:
+  outputSchema: run-result-v1
+  requiredArtifactKinds:
+    - report
+  stopConditions:
+    - missing-material-input
+    - permission-required
+    - controlled-data
+
+enabled: true

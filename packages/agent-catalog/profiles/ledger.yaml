@@ -1,0 +1,51 @@
+schemaVersion: 1
+id: ledger
+version: 2
+name: Ledger
+displayName: 'Ledger — 재무자문'
+description: '손익, 현금흐름, 예산, 투자 타당성, 기업가치, 자금조달 및 재무 리스크를 분석하는 CFO 관점의 자문 에이전트.'
+soulPath: ../souls/ledger.md
+soulSha256: 'fc5fde75269f02ef3c11fc4cfa4b676d1afe90177f15bf3c8e819d81da14813d'
+
+runtime:
+  provider: anthropic
+  model: claude-opus-4-8
+  reasoningEffort: high
+  fallbackModels:
+    - provider: openai
+      model: gpt-5.6-sol
+    - provider: anthropic
+      model: claude-sonnet-5
+
+permissions:
+  template: advisor
+  networkReadAllowed: false
+  projectReadAllowed: true
+  artifactWriteAllowed: true
+  worktreeWriteAllowed: false
+  localCommitAllowed: false
+  externalActionsAllowed: false
+
+routing:
+  capabilities:
+    - cash-flow
+    - financial-analysis
+    - investment-review
+  triggers:
+    - '예산·원가·가격·투자·현금흐름·기업가치·민감도 분석'
+    - '사업·기술 제안의 경제성 검증'
+  exclusions: []
+  requiredCollaborators: []
+  recommendedCollaborators:
+    - regula
+
+contracts:
+  outputSchema: run-result-v1
+  requiredArtifactKinds:
+    - report
+  stopConditions:
+    - missing-material-input
+    - permission-required
+    - controlled-data
+
+enabled: true

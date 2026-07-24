@@ -1,0 +1,57 @@
+schemaVersion: 1
+id: nova
+version: 2
+name: Nova
+displayName: 'Nova — 운영·조직·성과관리'
+description: '조직 운영체계, 프로세스, 성과관리, 책임 구조 및 실행력 개선을 담당하는 경영 운영 자문 에이전트.'
+soulPath: ../souls/nova.md
+soulSha256: '89b6e256e2d1a373c4b681db814c25d32e9f150497d7834ae22557c2df3bbe93'
+
+runtime:
+  provider: anthropic
+  model: claude-sonnet-5
+  reasoningEffort: medium
+  fallbackModels:
+    - provider: openai
+      model: gpt-5.6-terra
+    - provider: anthropic
+      model: claude-opus-4-8
+
+permissions:
+  template: advisor
+  networkReadAllowed: false
+  projectReadAllowed: true
+  artifactWriteAllowed: true
+  worktreeWriteAllowed: false
+  localCommitAllowed: false
+  externalActionsAllowed: false
+
+routing:
+  capabilities:
+    - operating-model
+    - organizational-design
+    - performance-management
+  triggers:
+    - '조직 구조'
+    - 'R&R'
+    - KPI
+    - '회의체'
+    - '업무 병목'
+    - '변화관리'
+  exclusions: []
+  requiredCollaborators: []
+  recommendedCollaborators:
+    - atlas
+    - nexus
+    - archon
+
+contracts:
+  outputSchema: run-result-v1
+  requiredArtifactKinds:
+    - report
+  stopConditions:
+    - missing-material-input
+    - permission-required
+    - controlled-data
+
+enabled: true

@@ -17,6 +17,7 @@
     "test:coverage": "vitest run --coverage --config ../../vitest.config.ts"
   },
   "dependencies": {
-    "@orion/contracts": "workspace:*"
+    "@orion/contracts": "workspace:*",
+    "yaml": "2.9.0"
   }
 }

@@ -1,0 +1,58 @@
+schemaVersion: 1
+id: insight
+version: 2
+name: Insight
+displayName: 'Insight — 데이터·AI 인텔리전스'
+description: '경영, 제조, 고객, 품질 데이터를 의사결정 가능한 지표·분석·AI 활용 과제로 전환하는 데이터 전략 에이전트.'
+soulPath: ../souls/insight.md
+soulSha256: 'd91283cbff65beca3f5411cd884c5d066846e64541b5b48efe574e65f8bd2eb0'
+
+runtime:
+  provider: openai
+  model: gpt-5.6-terra
+  reasoningEffort: high
+  fallbackModels:
+    - provider: anthropic
+      model: claude-sonnet-5
+    - provider: openai
+      model: gpt-5.6-sol
+
+permissions:
+  template: advisor
+  networkReadAllowed: false
+  projectReadAllowed: true
+  artifactWriteAllowed: true
+  worktreeWriteAllowed: false
+  localCommitAllowed: false
+  externalActionsAllowed: false
+
+routing:
+  capabilities:
+    - analytics
+    - data-strategy
+    - responsible-ai
+  triggers:
+    - KPI
+    - '데이터 품질'
+    - '분석'
+    - '예측'
+    - '이상 탐지'
+    - 'AI 활용 우선순위'
+  exclusions: []
+  requiredCollaborators: []
+  recommendedCollaborators:
+    - ledger
+    - helios
+    - keystone
+    - archon
+
+contracts:
+  outputSchema: run-result-v1
+  requiredArtifactKinds:
+    - report
+  stopConditions:
+    - missing-material-input
+    - permission-required
+    - controlled-data
+
+enabled: true

@@ -1,0 +1,57 @@
+schemaVersion: 1
+id: nexus
+version: 2
+name: Nexus
+displayName: 'Nexus — 제품관리·프로덕트 오너'
+description: '고객 문제, 사업 목표, 디자인, 기술 제약을 연결해 제품 요구사항과 우선순위를 정의하는 프로덕트 오너 에이전트.'
+soulPath: ../souls/nexus.md
+soulSha256: '507e5584cc4553c35936aeb60b2fbd5e3c90c80343ce9068cffde9670cdb1589'
+
+runtime:
+  provider: anthropic
+  model: claude-sonnet-5
+  reasoningEffort: medium
+  fallbackModels:
+    - provider: openai
+      model: gpt-5.6-terra
+    - provider: anthropic
+      model: claude-opus-4-8
+
+permissions:
+  template: orchestrator
+  networkReadAllowed: false
+  projectReadAllowed: true
+  artifactWriteAllowed: true
+  worktreeWriteAllowed: false
+  localCommitAllowed: false
+  externalActionsAllowed: false
+
+routing:
+  capabilities:
+    - product-planning
+    - requirements
+    - roadmapping
+  triggers:
+    - '기능 요청'
+    - '제품 로드맵'
+    - '사용자 스토리'
+    - '인수 기준'
+    - '범위 결정'
+  exclusions: []
+  requiredCollaborators: []
+  recommendedCollaborators:
+    - miro
+    - iris
+    - archon
+    - verify
+
+contracts:
+  outputSchema: run-result-v1
+  requiredArtifactKinds:
+    - report
+  stopConditions:
+    - missing-material-input
+    - permission-required
+    - controlled-data
+
+enabled: true
