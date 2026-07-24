@@ -11,12 +11,20 @@ import {
   claudeSmokeArgv,
   codexSmokeArgv,
   invokeSmokeProvider,
+  issueGrant,
+  pendingEvidence,
+  resolveLedgerDirectory,
+  withRepositoryStatus,
   isSmokePass,
   providerSmokeResultSchema,
   requiresRealProviderTestOptIn,
   runProviderSmoke,
   runProviderSmokeWithBestEffortCleanup,
   sameSnapshot,
+  AUTHORIZATION_ID_ENV,
+  CODEX_MODEL_ENV,
+  LEDGER_DIR_ENV,
+  type GrantIssuer,
   type ProviderSmokeDirectoryRemover,
   type ProviderSmokePaths,
   type SmokeLedger,
@@ -80,7 +88,10 @@ class InMemoryLedger implements SmokeLedger {
     this.used[provider] += 1;
     return { provider, ordinal: this.used[provider] };
   }
-  public usage(_authorizationId: string, provider: SmokeProviderKey): { granted: number; used: number } {
+  public usage(
+    _authorizationId: string,
+    provider: SmokeProviderKey,
+  ): { granted: number; used: number } {
     return { granted: 1, used: this.used[provider] };
   }
   public recordOutcome(_authorizationId: string, reservation: Reservation): void {
@@ -99,7 +110,17 @@ function codexSuccessFrames(): readonly string[] {
 function claudeSuccessFrames(): readonly string[] {
   return [
     `${JSON.stringify({ type: 'system', subtype: 'init', session_id: 'claude-session', uuid: 'u0', model: 'sonnet' })}\n`,
-    `${JSON.stringify({ type: 'assistant', uuid: 'u1', message: { id: 'm1', content: [{ type: 'text', text: 'hi' }, { type: 'tool_use', id: 't1', name: 'Read', input: {} }] } })}\n`,
+    `${JSON.stringify({
+      type: 'assistant',
+      uuid: 'u1',
+      message: {
+        id: 'm1',
+        content: [
+          { type: 'text', text: 'hi' },
+          { type: 'tool_use', id: 't1', name: 'Read', input: {} },
+        ],
+      },
+    })}\n`,
     `${JSON.stringify({ type: 'user', uuid: 'u2', message: { content: [{ type: 'tool_result', tool_use_id: 't1', is_error: false }] } })}\n`,
     `${JSON.stringify({ type: 'result', uuid: 'u3', usage: { input_tokens: 3, output_tokens: 2, cache_read_input_tokens: 1 }, total_cost_usd: 0.5, structured_output: validResult })}\n`,
   ];
@@ -321,7 +342,10 @@ describe('deferred provider smoke contract', () => {
       },
       models: { openai: codexModel, anthropic: claudeModel },
     });
-    expect(missing.providers.map((p) => p.reachedStage)).toEqual(['grant_missing', 'grant_missing']);
+    expect(missing.providers.map((p) => p.reachedStage)).toEqual([
+      'grant_missing',
+      'grant_missing',
+    ]);
 
     const unsafe = await runProviderSmoke({
       authorizationId: 'AUTH-1',
@@ -407,5 +431,44 @@ describe('deferred provider smoke contract', () => {
     expect(removedPaths).toEqual([paths.repository, 'C:\\runtime']);
     expect(PROVIDER_SMOKE_CLEANUP_MAX_RETRIES).toBe(3);
     expect(PROVIDER_SMOKE_CLEANUP_RETRY_DELAY_MS).toBe(100);
+  });
+
+  it('issues a grant (0 provider calls) binding operator-selected models to an authorization id', () => {
+    const issued: Array<{ authorizationId: string; codexModel: string; claudeModel: string }> = [];
+    const issuer: GrantIssuer = {
+      grant: (request) => {
+        issued.push(request);
+        return { ...grant, providers: { ...grant.providers } };
+      },
+    };
+    issueGrant(
+      { [AUTHORIZATION_ID_ENV]: 'AUTH-9', [CODEX_MODEL_ENV]: 'gpt-5.1-codex' },
+      () => issuer,
+    );
+    expect(issued).toEqual([
+      {
+        authorizationId: 'AUTH-9',
+        codexModel: 'gpt-5.1-codex',
+        claudeModel: DEFAULT_CLAUDE_SMOKE_MODEL,
+      },
+    ]);
+    expect(() => issueGrant({ [CODEX_MODEL_ENV]: 'gpt-5.1-codex' }, () => issuer)).toThrow();
+  });
+
+  it('resolves the ledger directory from an override or the LOCALAPPDATA default', () => {
+    expect(resolveLedgerDirectory({ [LEDGER_DIR_ENV]: 'D:\\ledger' })).toBe('D:\\ledger');
+    expect(resolveLedgerDirectory({ LOCALAPPDATA: 'C:\\Users\\x\\AppData\\Local' })).toBe(
+      'C:\\Users\\x\\AppData\\Local\\Orion\\provider-smoke-ledger',
+    );
+  });
+
+  it('flags a repository mutation as repository_changed and treats empty evidence as non-pass', () => {
+    const succeeded = {
+      ...pendingEvidence('openai', 'invocation_completed', 1),
+      exitClassification: 'succeeded' as const,
+    };
+    expect(withRepositoryStatus(succeeded, true).exitClassification).toBe('succeeded');
+    expect(withRepositoryStatus(succeeded, false).exitClassification).toBe('repository_changed');
+    expect(isSmokePass({ schemaVersion: 1, providers: [] })).toBe(false);
   });
 });

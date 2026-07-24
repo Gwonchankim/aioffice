@@ -352,7 +352,8 @@ function recordNormalizedItem(item: NormalizedItem, summary: ProviderSummary): v
   switch (item.kind) {
     case 'session':
       increment(summary, 'run.started');
-      if (isSafeOpaqueIdentifier(item.sessionId)) summary.sessionIdHash = hashOpaque(item.sessionId);
+      if (isSafeOpaqueIdentifier(item.sessionId))
+        summary.sessionIdHash = hashOpaque(item.sessionId);
       return;
     case 'output':
       increment(summary, 'run.output.delta');
@@ -392,7 +393,11 @@ function captureMetadata(metadata: NormalizedMetadata, summary: ProviderSummary)
   if (summary.modelReported === null && metadata.model !== undefined)
     summary.modelReported = metadata.model;
   if (metadata.usage !== undefined) captureUsage(metadata.usage, summary);
-  if (summary.reportedCost === null && typeof metadata.costUsd === 'number' && metadata.costUsd >= 0)
+  if (
+    summary.reportedCost === null &&
+    typeof metadata.costUsd === 'number' &&
+    metadata.costUsd >= 0
+  )
     summary.reportedCost = metadata.costUsd;
 }
 
@@ -559,9 +564,10 @@ export async function runProviderSmoke(deps: RunProviderSmokeDeps): Promise<Prov
       {
         provider,
         executable: repository.executableFor(provider),
-        argv: provider === 'openai'
-          ? codexSmokeArgv(repository.paths, deps.models.openai)
-          : claudeSmokeArgv(repository.paths, deps.models.anthropic),
+        argv:
+          provider === 'openai'
+            ? codexSmokeArgv(repository.paths, deps.models.openai)
+            : claudeSmokeArgv(repository.paths, deps.models.anthropic),
         cwd: repository.paths.repository,
         environment: repository.environmentFor(provider),
         permissionMode: PERMISSION_MODE[provider],
@@ -601,12 +607,21 @@ function usageEnvelope(
   return {
     schemaVersion: EVIDENCE_SCHEMA_VERSION,
     providers: PROVIDER_ORDER.map((provider) =>
-      pendingEvidence(provider, reachedStage, safeUsed(ledger, authorizationId, provider), errorCode),
+      pendingEvidence(
+        provider,
+        reachedStage,
+        safeUsed(ledger, authorizationId, provider),
+        errorCode,
+      ),
     ),
   };
 }
 
-function safeUsed(ledger: SmokeLedger, authorizationId: string, provider: SmokeProviderKey): number {
+function safeUsed(
+  ledger: SmokeLedger,
+  authorizationId: string,
+  provider: SmokeProviderKey,
+): number {
   try {
     return ledger.usage(authorizationId, provider).used;
   } catch {
@@ -700,18 +715,25 @@ export function resolveLedgerDirectory(environment: NodeJS.ProcessEnv): string {
   return join(localAppData, 'Orion', 'provider-smoke-ledger');
 }
 
+export interface GrantIssuer {
+  grant(request: {
+    readonly authorizationId: string;
+    readonly codexModel: string;
+    readonly claudeModel: string;
+  }): AuthorizationGrant;
+}
+
 export function issueGrant(
   environment: NodeJS.ProcessEnv,
-  ledgerFactory: () => SmokeLedger = () =>
+  ledgerFactory: () => GrantIssuer = () =>
     new ProviderAuthorizationLedger(resolveLedgerDirectory(environment), {
       forbiddenRoots: [workspaceRoot],
-    }) as unknown as SmokeLedger,
+    }),
 ): AuthorizationGrant {
   const authorizationId = requiredEnvironment(environment, AUTHORIZATION_ID_ENV);
   const codexModel = requiredEnvironment(environment, CODEX_MODEL_ENV);
   const claudeModel = environment[CLAUDE_MODEL_ENV] ?? DEFAULT_CLAUDE_SMOKE_MODEL;
-  const ledger = ledgerFactory() as unknown as ProviderAuthorizationLedger;
-  return ledger.grant({ authorizationId, codexModel, claudeModel });
+  return ledgerFactory().grant({ authorizationId, codexModel, claudeModel });
 }
 
 export async function runDeferredProviderSmoke(): Promise<ProviderSmokeEnvelope> {
@@ -732,7 +754,7 @@ export async function runDeferredProviderSmoke(): Promise<ProviderSmokeEnvelope>
     ledger: () =>
       new ProviderAuthorizationLedger(resolveLedgerDirectory(environment), {
         forbiddenRoots: [workspaceRoot],
-      }) as unknown as SmokeLedger,
+      }),
     models: grantModels(),
     processPort: new runtime.NativeProviderProcessPort() as SmokeProcessPort,
     prepareRepository: async () => {
@@ -804,7 +826,10 @@ async function createSyntheticPublicRepository(gitExecutable: string): Promise<s
   }
   try {
     await mkdir(join(repository, 'src'));
-    await writeFile(join(repository, 'README.md'), '# Synthetic public provider smoke repository\n');
+    await writeFile(
+      join(repository, 'README.md'),
+      '# Synthetic public provider smoke repository\n',
+    );
     await writeFile(join(repository, 'src', 'example.ts'), 'export const answer = 42;\n');
     await runGit(gitExecutable, repository, ['init', '--initial-branch', 'main']);
     await runGit(gitExecutable, repository, ['config', 'user.name', 'Orion Smoke']);
@@ -820,7 +845,12 @@ async function createSyntheticPublicRepository(gitExecutable: string): Promise<s
 
 function runGit(executable: string, cwd: string, argv: readonly string[]): Promise<void> {
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(executable, argv, { cwd, shell: false, stdio: 'ignore', windowsHide: true });
+    const child = spawn(executable, argv, {
+      cwd,
+      shell: false,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
     child.once('error', () => rejectRun(new Error('The synthetic repository command failed.')));
     child.once('close', (code) => {
       if (code === 0) resolveRun();
