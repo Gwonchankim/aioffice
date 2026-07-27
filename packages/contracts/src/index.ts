@@ -1,4 +1,5 @@
 export * from './agent-profile.js';
+export * from './agent-workforce.js';
 export * from './approval.js';
 export * from './arca.js';
 export * from './arca-invocation.js';

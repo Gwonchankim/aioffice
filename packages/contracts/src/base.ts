@@ -80,7 +80,10 @@ export const projectKeySchema = z
   .string()
   .regex(/^[a-z][a-z0-9_-]{1,63}$/, 'Expected a lower-case project key slug.');
 
-export const agentIdSchema = z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/, 'Expected an agent ID.');
+// Agent Profile Format Specification §4: `^[a-z][a-z0-9_-]{1,31}$` (2-32 chars).
+// Every built-in id is at least four characters long, so narrowing the previous
+// `{0,31}` leaves seeds, fixtures and the generated OpenAPI document unchanged.
+export const agentIdSchema = z.string().regex(/^[a-z][a-z0-9_-]{1,31}$/, 'Expected an agent ID.');
 export const sha256HexSchema = z
   .string()
   .regex(/^[a-f0-9]{64}$/, 'Expected a lowercase SHA-256 hash.');

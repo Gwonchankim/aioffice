@@ -23,6 +23,7 @@ export type ApplicationErrorCode =
   | 'REPOSITORY_MUTATED_DURING_REGISTRATION'
   | 'TASK_EXECUTION_CONFLICT'
   | 'WORKTREE_CONFLICT'
+  | 'APPROVAL_REQUIRED'
   | 'NOT_FOUND'
   | 'VALIDATION_FAILED'
   | 'INVALID_STATE_TRANSITION'
@@ -118,6 +119,9 @@ function defaultStatus(code: ApplicationErrorCode): number {
       return 409;
     case 'IDEMPOTENCY_REQUIRED':
       return 400;
+    // API Contract §4: an external action attempted before its approval.
+    case 'APPROVAL_REQUIRED':
+      return 423;
     case 'VALIDATION_FAILED':
     case 'PROVIDER_EXECUTABLE_INVALID':
     case 'PROVIDER_UNSUPPORTED':
