@@ -270,6 +270,7 @@ DB에 없지만 app runtime root 안에 있는 worktree는 자동 삭제하지 �
 - profile export
 - audit log
 - 중요 artifact manifest
+- 에이전트 정의·프로필 version·고용 상태·채용 제안 이력(DB copy에 포함되며 profile export만으로는 고용 상태가 복원되지 않는다)
 
 worktree 전체는 기본 DB backup에 포함하지 않는다. 미통합 commit은 Git bundle 또는 해당 worktree 보존으로 별도 관리한다.
 
@@ -300,6 +301,7 @@ worktree 전체는 기본 DB backup에 포함하지 않는다. 미통합 commit�
 - task event·prompt·artifact·usage: 완료 후 90일
 - app worktree: 완료 후 7일, 미통합 변경 제외
 - profile version·project·audit: 사용자 삭제 전까지
+- 에이전트 정의·프로필 version·고용 상태·채용 제안: 보존 대상이며 retention job의 자동 삭제 대상이 아니다. 해고된 에이전트도 정리하지 않는다.
 
 ### 13.2 즉시 삭제
 
@@ -406,6 +408,7 @@ worktree 전체는 기본 DB backup에 포함하지 않는다. 미통합 commit�
 - [ ] provider version 변경 확인
 - [ ] failed retention·security alert 확인
 - [ ] 모델 fallback·rate limit 추세 확인
+- [ ] 만료 대기 중인 채용 제안과 등록 상한 여유 확인
 
 ### 릴리스 전
 
@@ -442,3 +445,39 @@ M4의 `local-folder`와 `registered-git` connector 점검은 canonical absolute 
 감사 검토는 metadata-only로 수행한다. 권한 있는 검토자는 actor, action, sourceId/requestId, projectId, purpose, allow/deny 결정, policy version, connector, timestamp, excerpt range/locator, content hash를 확인하고, raw excerpt, credential, raw connector output, full prompt, full tool log를 수집하거나 표시하지 않는다. 감사 조회도 권한 필터를 적용하며 비가시·존재하지 않는 source-specific lookup의 차이나 집계를 노출하지 않는다.
 
 Arca는 source repository의 소유자가 아니다. 운영, 복구, 최신성 확인, connector 오류 대응, 보관 절차 중에도 원본 저장소에 write, delete, move, rename, commit 또는 그 밖의 mutation을 수행하지 않는다.
+
+## 21. Agent Workforce 운영 (M3)
+
+M3의 에이전트 인력 상태는 headless API와 DB로만 존재한다. 관리 UI는 M5이므로 M3 시점의 운영 조작은 API 또는 직접 조회를 통해 이루어지며, 아래 원칙은 두 경로 모두에 동일하게 적용된다.
+
+### 21.1 상태 확인
+
+- 확인 대상은 세 가지로 분리한다. **정의**(`agent_definitions`, 신원), **프로필 version**(`agent_profiles`는 기본 내장 전용, `agent_profile_versions`는 custom 전용), **고용 상태**(`agent_employments`). "이 에이전트를 지금 쓸 수 있는가"의 유일한 권위는 세 번째다.
+- 정상 기준선: 정의 18건 이상, 고용 상태 row 수는 정의 수와 동일, 기본 내장 17개가 `active`, `arca`는 `draft`.
+- 계획에 특정 에이전트가 나타나지 않으면 프로필을 고치기 전에 먼저 고용 상태를 본다. `suspended`와 `retired`는 모두 신규 Plan 선택 불가·신규 Run 시작 불가다.
+
+### 21.2 해고는 되돌릴 수 있다
+
+- 해고(`retired`)는 물리 삭제가 아니다. 정의 row, 프로필 version, 과거 Run 스냅샷, 감사 이력은 그대로 남는다.
+- 실수로 해고했다면 **재고용**(`rehire`)으로 복구한다. DB 복원이나 백업 되돌리기가 필요하지 않다. version을 지정하지 않으면 직전 활성 version이 복원되며, 중단 중에 생긴 새 version으로 자동 승격되지 않는다.
+- 일시적인 중지 의도라면 해고 대신 **일시 중지**(`suspend`)를 쓰고 `resume`으로 되돌린다.
+- 해고는 실행 중인 Run을 자동 종료하지 않는다. 진행 중 작업을 멈추려면 별도로 명시적 취소를 수행한다.
+
+### 21.3 정의는 append-only다
+
+- `agent_definitions`와 `agent_profile_versions`는 UPDATE와 DELETE가 trigger로 차단되어 있다. 잘못된 정의를 "지워서" 정리하는 절차는 존재하지 않는다.
+- 잘못 만든 에이전트는 `dismiss`로 폐기 상태에 둔다. 이력은 남는다.
+- 따라서 등록 상한 `MAX_REGISTERED_AGENTS = 64`는 누적 생성 high-water mark다. **해고해도 슬롯이 회수되지 않으며** 자동 삭제로 슬롯을 확보하지도 않는다. 상한에 도달하면 신규 생성 요청이 거부되고, 상향은 서버 설정 변경과 별도 승인 대상이다. 대량 생성·테스트로 슬롯을 소모하지 않도록 운영한다.
+- 잘못된 내용의 프로필은 수정이 아니라 **새 version 추가**로 바로잡고, 필요하면 그 version으로 재고용한다.
+
+### 21.4 채용 제안 만료
+
+- 제안은 생성 후 **30분**에 만료한다. 만료는 사용자 결정이 아닌 자동 처리이므로 결정 주체가 기록되지 않는다.
+- 만료·거절된 제안은 재사용할 수 없다. 다시 진행하려면 새 제안을 만든다.
+- 승인 대기 중 제안 내용이 바뀌어 hash가 달라지면 기존 승인은 무효다. 승인 요청은 화면·응답에 표시된 제안 hash를 그대로 다시 제시해야 한다.
+- 승인 없이 활성화된 에이전트가 관측되면 이는 정상 상태가 아니다. Security §17의 SEV-1(무승인 외부 변경)에 준해 scheduler를 중지하고 감사 로그로 전이 경로를 확인한다.
+- 서버 재시작·DB 복원으로 시각이 과거로 돌아가더라도 이미 만료된 제안을 되살리지 않는다.
+
+### 21.5 Arca
+
+`arca`는 M3에서 registry runtime이 없으므로 `draft`이며 API·서비스·DB 세 계층에서 활성화가 차단된다. 운영 중 arca에 대한 `hire`·`rehire`·`resume`이 거부되는 것은 정상 동작이며 장애가 아니다. 직접 SQL로 우회하지 않는다.

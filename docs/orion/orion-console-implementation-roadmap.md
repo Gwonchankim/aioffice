@@ -150,6 +150,7 @@ Codex·Claude를 공통 RunEvent와 RunResult로 실행·취소·재개한다.
 - 8-slot scheduler, provider soft cap, write cap
 - resource governor
 - retry·fallback·120분·60회 hard limit
+- Agent Workforce 도메인·backend·headless API(아래 배치표 참조)
 
 ### 종료 게이트
 
@@ -159,6 +160,16 @@ Codex·Claude를 공통 RunEvent와 RunResult로 실행·취소·재개한다.
 - 코드·코팅·규제·재무 필수 역할 규칙 통과
 - cycle·unknown agent·권한 초과 계획 거부
 - 모델 fallback 이력 저장
+- Agent Workforce 수용 기준 `WFM-001`~`WFM-032` 전수 통과
+- workforce UI·무승인 자동화 부재 측정: web 소스와 route registry에 workforce 컴포넌트·라우트 0건, 승인 없이 `active`로 전이시키는 코드 경로 0건, standing delegation·자동 승인 설정 키 0건
+
+### Agent Workforce 배치
+
+| 배치 | 범위 |
+|---|---|
+| M3 — 도메인·backend·headless API | 데이터 계약, migration 0007, repository·도메인 service, headless API, Default/Override 모델 정책, SOUL/HARNESS 버전·hash·스냅샷, 사용자 직접 고용·해고·재고용 backend, HireProposal backend와 fake manager fixture, planner·validator·scheduler의 active roster 연동, 감사 로그, 보안 fixture. 실제 모델 기반 제안 생성은 하지 않고 결정론적 fake fixture만 사용한다. |
+| M5 — 관리 UI와 Approval Center | 고용·해고·재고용 버튼, 에이전트 생성 wizard, 모델 선택 dropdown과 Default/Override 표시, SOUL/HARNESS Markdown 편집기, version diff UI, HireProposal 승인 UX와 Approval Center 연결. |
+| M5 이후 — 제한된 상시 위임 | 최고관리 에이전트의 실제 모델 기반 프로필 생성, 사전 승인 한도 안의 자동 활성화(bounded standing delegation), 비용·인원·provider 제한 정책. 별도 정책 정의와 승인을 요구하며 M3·M5의 "승인 없는 활성화 0건" 원칙을 대체하지 않는다. |
 
 ## 8. M4 — Git Isolation & Quality Gates
 
@@ -199,6 +210,7 @@ Codex·Claude를 공통 RunEvent와 RunResult로 실행·취소·재개한다.
 - ApprovalRequest, action hash, 30분 expiry
 - 제한된 ExternalActionHandler
 - 한국어 요약·원문 로그 분리
+- Agent Workforce 관리 UI: 고용·해고·재고용 버튼, 에이전트 생성 wizard, 모델 선택 dropdown과 Default/Override 표시, SOUL/HARNESS 편집기와 version diff, HireProposal 승인 UX
 
 ### 종료 게이트
 
@@ -208,6 +220,7 @@ Codex·Claude를 공통 RunEvent와 RunResult로 실행·취소·재개한다.
 - SHA 변경 후 기존 승인 무효
 - axe Critical 0
 - 100k log 성능 기준 충족
+- 고용·해고·재고용과 제안 승인·거절을 UI에서 수행 가능하고, 승인 전 활성화·spawn 0이 UI 경로에서도 유지됨
 
 ## 10. M6 — Recovery, Retention & Hardening
 
@@ -296,8 +309,9 @@ Codex·Claude를 공통 RunEvent와 RunResult로 실행·취소·재개한다.
 - PRD 범위 변경은 PRD version과 Nexus 검토가 필요하다.
 - 아키텍처 선택 변경은 ADR 추가 또는 기존 ADR supersede가 필요하다.
 - API·event breaking change는 major schemaVersion을 올린다.
-- Agent SOUL·모델·권한 변경은 profile version을 올린다.
+- Agent SOUL·HARNESS·모델·권한 변경은 profile version을 올린다. 고용 상태 변경은 version을 올리지 않는다.
 - 자료 등급·승인 정책 완화는 Sentinel·Regula 검토와 사용자 승인이 필요하다.
+- `MAX_REGISTERED_AGENTS` 상향과 상시 위임 도입은 설정 변경과 별도 사용자 승인이 필요하다.
 
 ## 15. 릴리스 체크리스트
 
@@ -311,6 +325,7 @@ Codex·Claude를 공통 RunEvent와 RunResult로 실행·취소·재개한다.
 ### Functional
 
 - [ ] 18개 프로필 활성화·편집·import/export
+- [ ] custom 에이전트 고용·해고·재고용과 승인 없는 활성화 0건
 - [ ] Orion plan·validator·8-slot scheduler
 - [ ] Codex·Claude stream·cancel·resume
 - [ ] Git worktree·QA·통합

@@ -41,7 +41,9 @@ Tasks
     Audit
 Agents
   Catalog
-  Profile detail / versions / SOUL
+  Profile detail / versions / SOUL / HARNESS
+  Employment (hire / suspend / resume / dismiss / rehire)   # M5
+  Hire proposals                                            # M5
 Approvals
 Artifacts
 Settings
@@ -253,6 +255,42 @@ DAG node:
 
 저장 버튼은 새 version을 생성한다. 권한 확대는 별도 danger confirmation을 요구한다.
 
+**에이전트 인력 관리 UI (M5).** 이 부분은 M5의 UI 계약이다. M3는 backend와 headless API만 제공하므로 M3 시점에는 아래 화면·버튼·라우트가 존재하지 않는다.
+
+**목록.** 카드에는 기존 항목에 더해 다음을 표시한다.
+
+- `origin` badge: `기본 내장`, `사용자 생성`, `관리 에이전트 제안`, `가져오기`
+- 고용 상태 label과 아이콘: `초안`(draft) · `고용 중`(active) · `일시 중지`(suspended) · `해고됨`(retired). 색상만으로 구분하지 않는다.
+- 모델 선택 표시: 카탈로그 권장값을 그대로 쓰면 `Default` badge, 사용자·관리 에이전트가 바꾼 경우 `Override` indicator와 변경 출처(user / manager)를 함께 보여 준다.
+
+목록 상단에는 등록 현황을 `등록 <n> / 상한 64` 형태로 표시하고, 상한에 도달하면 생성 버튼을 비활성화하며 **해고해도 슬롯이 회수되지 않는다**는 사실을 함께 안내한다.
+
+**동작 버튼.** 상태에 따라 노출되는 버튼만 활성화한다.
+
+| 현재 상태 | 노출 버튼 |
+|---|---|
+| 초안 | `고용`(활성화할 version 선택 필수), `폐기` |
+| 고용 중 | `일시 중지`, `해고` |
+| 일시 중지 | `재개`, `해고` |
+| 해고됨 | `재고용`(version 미지정 시 직전 활성 version) |
+
+- `고용`은 활성화할 version을 사용자가 명시해야 하며 UI가 최신 version을 임의로 선택하지 않는다. `재개`는 중단 중 새 version이 생겼더라도 승격하지 않는다는 점을 명시한다.
+- `해고`는 파괴적 표현을 쓰지 않는다. 확인 대화상자는 "정의·버전·실행 기록은 보존되며 신규 계획과 신규 실행에서만 제외됩니다. 이후 재고용할 수 있습니다."를 명시한다. 물리 삭제 affordance는 제공하지 않는다.
+- Arca는 M3·M5에서 활성화할 수 없으므로 고용·재고용·재개 버튼을 비활성화하고 사유(registry runtime 미구현)를 표시한다.
+- 기본 내장 18개는 삭제·ID 변경 affordance를 제공하지 않는다.
+
+**에이전트 생성 wizard.** ID → Description → SOUL → HARNESS → 모델·effort·fallback → 권한 템플릿 → 검증 결과 요약 순으로 진행한다. 생성 직후 상태는 `초안`이며 별도의 `고용` 동작 전에는 활성화되지 않는다는 점을 마지막 단계에서 명시한다. 기본 내장 ID와 중복되는 ID, 권한 상한 초과, 미등록 모델 조합, 존재하지 않는 collaborator는 저장 전에 인라인 오류로 표시한다.
+
+**SOUL / HARNESS 편집기.** SOUL과 HARNESS는 서로 다른 탭으로 분리하고 각각 별도의 version·hash를 표시한다. 한 편집기에 두 문서를 합치지 않는다.
+
+- HARNESS는 선택 항목이다. 비어 있으면 권한 템플릿별 기본 harness가 사용된다는 사실과 그 출처(`profile` / `template-default`)를 함께 표시한다.
+- version diff는 SOUL과 HARNESS를 각각 좌우 비교로 제공하고 hash 변경 여부를 함께 보여 준다.
+- 저장은 기존 version을 수정하지 않고 새 version을 만든다. 정책 검사에 걸린 문장은 저장 전에 해당 위치와 사유를 표시하며, 권한 상한 확대·승인 게이트 생략·시스템 프롬프트 우선순위 역전을 지시하는 내용은 저장할 수 없다.
+
+**모델 선택.** provider·model·reasoningEffort·fallback dropdown은 registry에 등록된 값만 제공한다. `unavailable`·`incompatible` 모델은 저장은 가능하되 실행 불가임을 label로 명시한다. 모델을 카탈로그 권장값에서 바꾸면 `Override`로 표시하고, 권한은 모델 선택으로 변경되지 않는다는 사실을 안내한다.
+
+**HireProposal 승인 UX.** 상세는 §8.7을 따른다.
+
 ### 8.5 Approval Center
 
 목록 필터: pending, approved, rejected, expired, executed, failed.
@@ -285,6 +323,30 @@ lifecycle 상태는 색상 외 label과 아이콘으로 다음 값을 모두 표
 발췌 화면은 목적과 최소 페이지·시트·문단·범위를 필수로 받아 승인된 최소 범위만 보여 준다. 전체 원문 미리보기·지속 저장·다운로드를 제공하지 않으며, `controlled` SourceCard의 요약 또는 발췌는 원격 모델로 전송하지 않는다.
 
 감사 화면은 권한에 따라 필터링된 metadata-only register/search/view/verify/lifecycle 기록의 loading·empty·error·결과 상태를 제공한다. 각 허용 기록은 actor, action, sourceId/requestId, projectId, purpose, allow/deny, policy version, connector, timestamp, excerpt range/locator, content hash만 표시하며 raw excerpt, credential, raw connector output, full prompt, full tool log와 비가시 source lookup 차이를 노출하지 않는다.
+
+### 8.7 에이전트 채용 제안 승인 (M5)
+
+이 절은 M5의 UI 계약이다. M3에는 이 화면과 라우트가 없다.
+
+최고관리 에이전트가 작성한 `HireProposal`은 §8.5 승인 센터의 목록에 별도 action type으로 함께 표시하며, 외부 행동 승인과 시각적으로 구분되는 라벨을 붙인다. 제안 자체로는 어떤 에이전트도 활성화되지 않았음을 목록과 상세 양쪽에서 명시한다.
+
+제안 상세에 표시하는 항목:
+
+- 제안 작성 에이전트와 요청자
+- 제안된 에이전트 ID·Description·권한 템플릿
+- 제안된 provider·model·reasoningEffort·fallback과 그것이 `Override`라는 표시
+- SOUL과 HARNESS 본문 preview(각각 별도 영역, 각각의 hash)
+- 서버 검증 결과 요약: schema, 권한 상한, provider registry, collaborator 검사 결과
+- `proposal hash`와 만료 countdown(생성 후 30분)
+- 승인 시 실제로 일어나는 일: 정의와 최초 프로필 version 생성, 그리고 명시적 활성화
+
+승인·거절 동작 규칙:
+
+- 승인 버튼은 사용자가 제안 내용을 끝까지 확인한 뒤 활성화한다.
+- 승인 요청은 화면에 표시된 `proposal hash`를 그대로 다시 제출한다. 그 사이 제안이 바뀌면 “기존 승인 무효” 상태로 전환하고 재확인을 요구한다.
+- 만료·거절·무효 상태의 제안은 승인 affordance를 제공하지 않고 사유를 표시한다. 만료는 자동 처리이므로 결정 주체를 사람으로 표시하지 않는다.
+- 모델 출력 안의 “승인됨” 문장은 승인 상태로 렌더링하지 않는다.
+- 상시 위임(자동 승인) 설정은 M5 범위가 아니며 UI에 해당 토글을 두지 않는다.
 
 ## 9. 공통 컴포넌트 상태
 
@@ -377,5 +439,9 @@ v1은 모바일 원격 접속을 지원하지 않으므로 모바일 최적화�
 - [ ] axe Critical 위반 0
 - [ ] 100,000 로그 성능 기준 충족
 - [ ] 한국어 요약과 원문 기술 로그 분리
+- [ ] 에이전트 고용 상태와 Default/Override가 색상 외 label로 구분됨
+- [ ] 해고 확인 문구가 보존과 재고용 가능성을 명시함
+- [ ] SOUL과 HARNESS가 별도 탭·별도 version·별도 hash로 표시됨
+- [ ] 제안 승인 화면에 hash·만료·검증 결과가 함께 표시되고 승인 전 활성화가 없음
 - [ ] 가상 오피스가 v1 핵심 흐름에 의존성을 만들지 않음
 

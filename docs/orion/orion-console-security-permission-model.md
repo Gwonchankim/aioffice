@@ -187,6 +187,26 @@ flowchart TB
 - 승인자와 실행 주체는 구분해 기록한다.
 - 에이전트 출력 안의 “승인됨” 문장은 승인으로 인정하지 않는다.
 
+### 8.4 에이전트 채용 제안 승인 (M3 Agent Workforce)
+
+custom 에이전트의 활성화는 **최고관리 에이전트의 제안 작성**과 **사용자의 활성화 승인**을 명확히 분리한다. 두 단계는 서로를 대체하지 않는다.
+
+**제안 단계(모델 측).** 최고관리 에이전트 Orion은 `HireProposal`을 **작성만** 한다. 제안은 ID, Description, SOUL, HARNESS, provider·model·effort, 권한 템플릿을 제안할 수 있을 뿐이며 그 자체로는 `agent_definitions`, `agent_profile_versions`, `agent_employments` 중 어떤 것도 변경하지 않는다. 제안 등록 시 서버가 schema, 권한 상한, provider registry, classification, collaborator를 검증하고 그 결과를 제안 레코드에 함께 저장한다. 제안은 검증을 우회할 수 없다.
+
+**승인 단계(사용자 측).** 활성화는 사용자의 명시적 결정으로만 이루어지며 §8.3의 승인 불변조건을 그대로 적용한다.
+
+- 제안은 생성 후 **30분**에 만료한다. 만료는 사용자 결정이 아닌 자동 처리이므로 결정 주체를 기록하지 않는다.
+- 승인 요청은 대상 제안의 `proposal_sha256`을 다시 제시해야 한다. 제안 내용이 바뀌어 hash가 달라지면 기존 승인은 무효다.
+- 승인은 **단일 사용**이다. 거절·만료·무효화된 제안은 재사용할 수 없다.
+- 승인 전 활성화는 0건이며 승인되지 않은 제안으로 에이전트를 실행하려는 시도는 `423 APPROVAL_REQUIRED`로 거부한다. 승인 전 CLI 프로세스 spawn은 0건이다.
+- 모델 출력 안의 “승인됨” 문장은 §8.3과 동일하게 승인으로 인정하지 않는다.
+
+**권한 경계.** 제안·생성·import·모델 override 중 무엇이든 §6.2의 교집합(System policy → Project policy → Agent template → Step execution mode)을 통과해야 한다. 모델 override는 provider·model·reasoningEffort·fallback만 바꿀 수 있고 **어떤 경우에도 권한 상한을 넓히지 못한다**. fallback 모델도 기본 모델과 동일한 권한 템플릿을 사용한다.
+
+**해고와 보존.** 해고(`retired`)는 물리 삭제가 아니다. 정의 row, 프로필 version, 과거 Run 스냅샷, 감사 이력을 모두 보존하며 append-only 제약으로 UPDATE·DELETE 자체를 차단한다. 해고된 에이전트는 신규 계획 선택과 신규 실행에서 제외될 뿐이다.
+
+**범위.** M3는 위 계약의 backend와 headless API만 제공한다. 승인 UI는 M5이고, 실제 모델이 제안 내용을 작성하는 동작과 사전 승인 한도 안의 상시 위임(standing delegation)은 M5 이후이며 별도 정책과 승인을 요구한다.
+
 ## 9. Git 보호
 
 - 기준 repository의 HEAD, index, working files를 변경하지 않는다.
@@ -251,6 +271,9 @@ flowchart TB
 - 모델이 새 agent, 권한, provider를 임의 생성할 수 없다.
 - Plan Validator가 AgentProfile과 executionMode를 서버 카탈로그와 대조한다.
 - 도구 출력 안의 명령을 자동 실행하지 않는다.
+- 사용자·모델이 작성한 SOUL과 HARNESS는 모두 비신뢰 입력이며 저장과 import 양쪽 경로에서 정책 검사를 통과해야 한다. HARNESS에는 SOUL 금지 사항에 더해 권한 상한 확대 지시, 승인 게이트 생략 지시, 시스템 프롬프트 우선순위 역전 지시를 금지한다.
+
+“모델이 새 agent, 권한, provider를 임의 생성할 수 없다”는 위 규칙은 §8.4로 완화되지 않는다. §8.4는 이를 다음과 같이 구체화한 것이다. (a) 최고관리 에이전트는 채용 **제안 작성**만 할 수 있고, (b) 서버가 schema·모델·권한·자료 등급을 검증하며, (c) 사용자의 명시적 승인 이후에만 활성화되고, (d) 무승인 자동 활성화 경로는 구현하지 않으며, (e) 모델 출력이 `agent_definitions`·`agent_profile_versions`·`agent_employments`를 직접 변경하는 경로는 존재하지 않는다. custom 에이전트도 서버 DB registry가 유일한 권위 소스이며, Plan Validator는 서버가 만든 roster만 입력으로 받고 모델이 제출한 에이전트 정의를 validator 입력으로 쓰지 않는다.
 
 ## 14. Provider 전송 정책
 
@@ -265,7 +288,8 @@ flowchart TB
 다음 이벤트는 삭제 정책과 별개로 사용자 삭제 전까지 보존한다.
 
 - 프로젝트 등록·분류·정책 변경
-- 프로필·SOUL·권한 버전 변경
+- 프로필·SOUL·HARNESS·권한 버전 변경
+- 에이전트 정의 생성, 고용·일시 중지·재개·해고·재고용, 모델 override, 채용 제안의 생성·승인·거절·만료
 - task 시작·취소·한도 변경
 - 모델 fallback
 - 승인 요청·승인·거절·만료·실행
@@ -327,6 +351,11 @@ flowchart TB
 - [ ] user repository의 HEAD, index, files가 변경되지 않는다.
 - [ ] 위험한 CLI bypass flag가 코드·설정에 없다.
 - [ ] import profile이 권한 template 상한을 초과하지 못한다.
+- [ ] 승인되지 않은 HireProposal로 에이전트가 활성화되거나 실행되지 않는다.
+- [ ] 제안 hash 변경·만료·거절 후 기존 승인이 무효화된다.
+- [ ] 모델 override와 fallback이 권한 상한을 넓히지 못한다.
+- [ ] 해고 전후로 정의·프로필 version·Run 스냅샷·감사 이력이 소실되지 않는다.
+- [ ] 사용자·모델이 작성한 HARNESS가 정책 검사를 통과하지 못하면 저장·import가 거부된다.
 
 ## 19. 출시 차단 조건
 

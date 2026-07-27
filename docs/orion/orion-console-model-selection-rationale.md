@@ -94,6 +94,25 @@ Fable 5는 adaptive thinking이 항상 켜져 있고 safeguard가 요청을 거�
 | 17 | Nexus | Claude Sonnet 5 | 요구사항·backlog·수용 기준은 잦은 상호작용과 반복 편집이 많아 균형형 모델을 사용한다. |
 | 18 | Arca | Claude Sonnet 5 | 향후 M1-M5 metadata-only registry 계약은 medium reasoning을 사용하며, 실행 전 프로젝트 classification과 provider policy를 확인한다. Fable은 기본·fallback으로 금지하고 fallback은 GPT-5.6 Terra → Claude Opus 4.8 순서만 허용한다. |
 
+### 5.1 Default와 Override의 provenance (M3)
+
+위 배정표는 **기본 내장 18개의 카탈로그 권장값**이다. M3부터 각 프로필 version은 모델 선택의 출처를 두 필드로 명시한다.
+
+| 필드 | 값 | 의미 |
+|---|---|---|
+| `selectionMode` | `default` | 이 표의 카탈로그 권장값을 그대로 사용한다. |
+| | `override` | 사용자 또는 최고관리 에이전트가 다른 조합을 지정했다. |
+| `selectionSource` | `catalog` | `default`와만 결합한다. |
+| | `user` | 사용자가 지정한 override. |
+| | `manager` | 최고관리 에이전트가 제안한 override. |
+
+- `default`는 `catalog` 출처로만 성립하고, `override`는 `user` 또는 `manager`로만 귀속된다. 두 조합 밖의 값은 저장 단계에서 거부한다.
+- `selectionMode`·`selectionSource`·provider·model·reasoningEffort·fallback은 하나의 `runtimeSelection`으로 프로필 version에 함께 저장된다. **권한은 이 객체에 포함되지 않는다.** override는 어떤 경우에도 §4.1의 hard gate와 권한 상한을 넓히지 못하며, fallback도 기본 모델과 동일한 권한 템플릿을 사용한다.
+- 모델을 바꾸는 것은 기존 version을 수정하는 것이 아니라 **새 프로필 version을 만드는 것**이다. 이 표를 바꾸지 않고도 개별 에이전트의 실행 모델을 override할 수 있으며, 반대로 override가 있다고 해서 이 문서의 카탈로그 배정이 변경되지는 않는다.
+- override에도 §4.1 hard gate, 프로젝트 classification, provider allowlist, Fable 규칙을 다시 적용한다. 실제 선택 결과와 `selectionSource`는 Run 스냅샷과 `run.model_fallback` 이벤트에 기록한다.
+- custom 에이전트는 이 배정표에 포함되지 않는다. custom 에이전트의 모델 선택도 같은 두 필드와 같은 검증을 따르며, 카탈로그 권장값이 없으므로 항상 `override`다.
+- 임의의 모델 문자열이 실행 argv에 직접 전달되지 않는다. argv는 registry에 등록된 모델 식별자만 사용하고 effort는 adapter가 지원 범위로 매핑한다.
+
 ## 6. 기본 fallback 순서
 
 | 기본 모델 | Fallback 1 | Fallback 2 | 비고 |
@@ -135,6 +154,15 @@ Provider별 effort 명칭이 다르면 adapter가 지원 범위 안에서 가장
 6. 문서의 논리 이름과 실제 CLI model ID를 registry alias로 연결
 
 Model Registry가 공식 profile과 충돌하면 실행을 강행하지 않고 UI에 `MODEL_UNAVAILABLE` 또는 `CLI_INCOMPATIBLE`을 표시한다.
+
+### 8.1 M3의 결정론적 fake capability matrix
+
+위 1~6번 절차는 **실제 CLI probe**를 전제한다. M3는 이를 수행하지 않는다. M3의 (provider, model, reasoningEffort) 검증은 결정론적 fake capability matrix fixture로만 이루어지며, 실제 provider 호출은 0회다.
+
+- 모델 목록과 포지션의 기준은 §3(GPT-5.6 Sol·Terra, Claude Fable 5·Opus 4.8·Sonnet 5), effort 기본값의 기준은 §7, 가용성 상태 값은 기존 provider 모델 상태 enum(`available` / `unavailable` / `incompatible`)이다.
+- fixture는 기존 fake provider registry를 확장한 것이며 `codex --version`·`claude --version` 확인, 인증 상태 확인, option probe, read-only smoke prompt를 수행하지 않는다.
+- 저장 시 검증(미등록·미지원 조합 거부)과 실행 시 판정(`unavailable`·`incompatible` 모델은 저장은 가능하되 활성 실행 불가)은 이 fixture 기준으로 동작한다. 따라서 M3의 `available` 판정은 **문서상 등록 여부**를 뜻하며 사용자 계정의 실제 가용성을 증명하지 않는다.
+- 실제 CLI capability probe와 read-only smoke는 M6 범위이며, 그때까지 이 문서의 §8 1~6번은 목표 계약으로 남는다.
 
 ## 9. 재평가 방법과 합격 기준
 
@@ -180,6 +208,9 @@ Model Registry가 공식 profile과 충돌하면 실행을 강행하지 않고 U
 - [ ] 모델별 CLI ID와 사용 가능 여부를 시작 시 probe한다.
 - [ ] fallback 이벤트와 최종 보고서에 실제 모델을 공개한다.
 - [ ] 모델 변경 시 profile version, 평가 증적, 관련 문서를 함께 갱신한다.
+- [ ] 모든 프로필 version이 `selectionMode`와 `selectionSource`를 가지며 `default`는 `catalog`와만 결합한다.
+- [ ] 모델 override와 fallback이 권한 상한을 넓히지 않는다.
+- [ ] M3의 모델 가용성 판정이 실제 CLI probe가 아니라 결정론적 fixture 기준임을 보고서에 명시한다.
 - [ ] Provider 공식 사양만이 아니라 Orion 역할별 gold set을 통과한다.
 - [ ] 공식 자료의 기준일을 분기마다 갱신한다.
 

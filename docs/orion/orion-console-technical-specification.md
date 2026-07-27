@@ -332,6 +332,92 @@ interface RunEvent {
 
 SSE `id`는 RunEvent sequence를 사용한다. 브라우저 재연결 시 `Last-Event-ID` 이후 이벤트를 DB에서 재생한 뒤 live stream에 연결한다.
 
+### 6.7 Agent Workforce 도메인 (M3)
+
+§6.3의 `AgentProfile`은 기본 내장 18개의 프로필 내용을 기술한다. M3는 여기에 **정체성 · 내용 · 고용 상태** 세 개념을 명시적으로 분리한 workforce 도메인을 추가한다. 세 개념을 하나로 합쳐 다루지 않는다.
+
+```ts
+// 불변 신원. 생성 후 UPDATE·DELETE가 없다.
+interface AgentDefinition {
+  id: string;
+  name: string;                 // 생성 시점의 불변 식별 기록
+  origin: "builtin" | "user_created" | "manager_proposed" | "imported";
+  createdBy: string;
+  createdAt: string;
+}
+
+// 불변 내용. 변경은 새 version row로만 이루어진다.
+interface AgentProfileVersion {
+  agentId: string;
+  version: number;
+  configSha256: string;
+  soulSha256: string;
+  harnessSha256: string | null;  // HARNESS는 선택 필드
+  runtimeSelection: RuntimeSelection;
+  origin: "user_created" | "manager_proposed" | "imported";
+  createdBy: string;
+  createdAt: string;
+}
+
+// 가변 고용 상태. "이 에이전트를 계획·실행에 쓸 수 있는가"의 유일한 런타임 권위.
+interface AgentEmployment {
+  agentId: string;
+  state: "draft" | "active" | "suspended" | "retired";
+  activeVersion: number | null;      // state==="active"일 때만 non-null
+  lastActiveVersion: number | null;
+  activatedAt: string | null;
+  deactivatedAt: string | null;
+  actor: string;
+  reason: string | null;
+  revision: number;                  // compare-and-swap
+  updatedAt: string;
+}
+
+interface RuntimeSelection {
+  selectionMode: "default" | "override";
+  selectionSource: "catalog" | "user" | "manager";
+  provider: "openai" | "anthropic";
+  model: string;
+  reasoningEffort: "low" | "medium" | "high" | "xhigh" | "max";
+  fallbackModels: Array<{ provider: "openai" | "anthropic"; model: string }>;
+}
+```
+
+- 현재 **표시 이름**의 권위는 활성 profile version(미고용이면 최신 version)의 `name`/`displayName`이다. `AgentDefinition.name`은 생성 시점 기록이며 두 값을 혼용하지 않는다.
+- `selectionMode: "default"`는 `selectionSource: "catalog"`와만 결합하고, `override`는 `user` 또는 `manager`로만 귀속된다. `RuntimeSelection`에는 권한이 포함되지 않는다. override는 어떤 경우에도 권한 상한을 넓히지 못한다.
+- 허용 전이는 7개뿐이다: `draft→active`(hire), `active→suspended`(suspend), `suspended→active`(resume), `active→retired`·`suspended→retired`·`draft→retired`(dismiss), `retired→active`(rehire). 자기 전이를 포함한 나머지 순서쌍은 모두 거부한다.
+- `hire`는 활성화할 version이 필수이고 `rehire`는 선택(미지정 시 `lastActiveVersion`)이며, `resume`은 `lastActiveVersion`을 복원한다. **어떤 action도 최신 version으로 자동 승격하지 않는다.**
+- 해고는 물리 삭제가 아니다. 정의·version·Run 스냅샷·감사 이력이 모두 남고, 실행 중인 Run을 자동 종료하지도 않는다.
+- `suspended`와 `retired`는 모두 신규 Plan 선택 불가·신규 Run 시작 불가다. 차이는 의도(일시적)와 재개 경로뿐이다.
+
+```ts
+// 최고관리 에이전트가 작성하는 채용 제안. 그 자체로는 아무것도 활성화하지 않는다.
+interface HireProposal {
+  id: string;
+  requestedBy: string;
+  authoredBy: string;              // 최고관리 에이전트 ID
+  proposedAgentId: string;
+  proposalSha256: string;
+  status:
+    | "pending_approval"
+    | "approved"
+    | "rejected"
+    | "expired"
+    | "activated"
+    | "invalidated";
+  createdAt: string;
+  expiresAt: string;               // 생성 후 30분
+  decidedAt: string | null;
+  decidedBy: string | null;        // expired는 자동 처리이므로 null
+  activatedAgentId: string | null;
+  activatedVersion: number | null;
+}
+```
+
+제안 본문(`proposed_definition_json` / `proposed_profile_json`)과 서버 검증 결과(`validation_json`)는 DB row에 함께 저장한다. 활성화는 `proposalSha256`을 다시 제시한 사용자 승인으로만 이루어지며, 상세 규칙은 Security §8.4를 따른다.
+
+Run과 planning-run 시작 시 profile version, SOUL 본문·hash, HARNESS 본문·hash와 출처(`profile` | `template-default`), 시스템 정책 version, effective provider/model/reasoningEffort, `selectionSource`, permission snapshot을 하나의 immutable snapshot으로 저장한다. 진행 중 Run은 새 version이나 고용 상태 변경의 영향을 받지 않는다.
+
 ## 7. SQLite 스키마
 
 ### 7.1 테이블
@@ -351,6 +437,12 @@ SSE `id`는 RunEvent sequence를 사용한다. 브라우저 재연결 시 `Last-
 | `git_worktrees` | id, project_id, task_id, run_id, path, branch, base_sha, status | 앱 생성 worktree 추적 |
 | `usage_records` | id, run_id, input_tokens, output_tokens, cache_tokens, duration_ms, reported_cost | 사용량 |
 | `audit_log` | id, actor, action, object_type, object_id, detail_json, created_at | 사용자·시스템 감사 기록 |
+| `agent_definitions` | id, name, origin, created_by, created_at | 에이전트 불변 신원(built-in 18 + custom) |
+| `agent_profile_versions` | agent_id, version, config_sha256, config_json, soul_sha256, harness_sha256, runtime_selection_json, origin, created_by, created_at | custom 에이전트의 불변 프로필 version |
+| `agent_employments` | agent_id, state, active_version, last_active_version, activated_at, deactivated_at, actor, reason, revision, updated_at | 에이전트 고용 상태 |
+| `hire_proposals` | id, requested_by, authored_by, proposed_agent_id, proposed_definition_json, proposed_profile_json, validation_json, proposal_sha256, status, created_at, expires_at, decided_at, decided_by, activated_agent_id, activated_version | 최고관리 에이전트의 채용 제안과 결정 이력 |
+
+**`audit_log` 컬럼 표기 drift(실측 기록).** 위 표의 `audit_log` 행은 `object_type`, `object_id`, `detail_json`을 적고 있으나, 실제 `migrations/0001_core.sql`이 만든 컬럼은 `id, actor, action, project_id, payload_json, created_at`이며 그 세 컬럼은 **존재하지 않는다**. 이는 관측된 사실로 기록만 하고 이 문서의 기존 표기를 임의로 고쳐 쓰지 않으며, 구현을 문서에 맞추는 `ALTER`도 하지 않는다(0001 불변 원칙). 따라서 workforce 감사 이벤트는 **실측 컬럼만 사용**한다. 에이전트 ID, version, 상태 전이, 제안 ID는 전부 `payload_json` 안에 넣고, 에이전트 범위 이벤트의 `project_id`는 NULL이다. 이 불일치의 해소 여부는 별도 결정 대상으로 남긴다.
 
 ### 7.2 DB 규칙
 
@@ -361,6 +453,51 @@ SSE `id`는 RunEvent sequence를 사용한다. 브라우저 재연결 시 `Last-
 - AgentProfile의 `(id, version)`은 unique다.
 - DB 쓰기는 짧은 transaction으로 수행하고 WAL mode를 사용한다.
 - 이벤트 payload와 프로필 snapshot은 Zod 검증 후 저장한다.
+- AgentProfile `(id, version)`의 유일성은 두 테이블에 걸쳐 성립한다. `agent_profiles`는 **built-in ID 전용**, `agent_profile_versions`는 **custom ID 전용**이며 두 키 공간이 서로소이므로 union에도 중복이 없다. 두 방향의 침범은 각각 trigger가 거부한다.
+- `agent_definitions`와 `agent_profile_versions`는 append-only다. UPDATE와 DELETE는 trigger가 거부한다.
+- `active_version`과 `last_active_version`은 origin에 따라 대상 테이블이 갈라지므로 DB FK로 표현하지 않는다. "해당 에이전트의 union version 집합에 존재하는 값인가"는 repository·service 계층이 검증한다.
+- 동시 고용 상태 변경은 `agent_employments.revision` compare-and-swap으로 직렬화한다.
+
+### 7.3 Agent Workforce 스키마 (migration 0007, 구현 기준)
+
+`0001~0006`은 수정하지 않고 `0007_m3_agent_workforce.sql`을 forward-only로 추가한다. 기존 `agent_profiles`의 36 rows(v1 skeleton 18 + v2 full 18)와 `config_sha256`, seed 순서는 그대로 보존한다.
+
+**테이블과 제약**
+
+- `agent_definitions`: `origin`은 `builtin | user_created | manager_proposed | imported` CHECK.
+- `agent_profile_versions`: PK `(agent_id, version)`, `version >= 1` CHECK, `agent_id`는 `agent_definitions(id)` FK(`ON DELETE RESTRICT`), `harness_sha256`만 nullable, `origin`은 `builtin`을 제외한 세 값 CHECK.
+- `agent_employments`: PK `agent_id`, `state` 4값 CHECK, `revision >= 1` CHECK, 그리고 `state='active'`와 `active_version IS NOT NULL`을 양방향으로 묶는 두 개의 CHECK.
+- `hire_proposals`: `status` 6값 CHECK와 status별 `decided_at`·`decided_by`·`activated_agent_id`·`activated_version` 조합을 강제하는 6개의 CHECK. `expired`는 자동 처리이므로 `decided_by`가 NULL이어야 한다. `hire_proposals_status(status, expires_at)` 인덱스를 둔다.
+
+**Seed** — built-in 18개를 `origin='builtin'`으로 넣고, `arca`를 제외한 17개를 `state='active'`, `active_version=2`로, `arca`는 `state='draft'`(reason `runtime-not-implemented`)로 넣는다. `retired`는 "고용된 적이 있다"를 함의하므로 한 번도 활성인 적 없는 Arca에는 쓰지 않는다.
+
+**Trigger** — 0004·0006과 동일하게 **seed INSERT 이후**에 생성한다. seed가 17개의 `active` row를 직접 넣으므로 INSERT guard가 seed보다 먼저 존재하면 migration 자체가 불가능하다.
+
+| Trigger | 이벤트 | 거부 사유 |
+|---|---|---|
+| `agent_definitions_append_only_update` / `_delete` | UPDATE·DELETE | `AGENT_DEFINITION_APPEND_ONLY` |
+| `agent_definitions_builtin_seed_only` | `origin='builtin'` INSERT | `BUILTIN_ORIGIN_SEED_ONLY` |
+| `agent_profile_versions_append_only_update` / `_delete` | UPDATE·DELETE | `PROFILE_VERSIONS_APPEND_ONLY` |
+| `agent_profile_versions_custom_space` | built-in ID를 custom 테이블에 INSERT | `CUSTOM_VERSION_SPACE_VIOLATION` |
+| `agent_profiles_builtin_space` | non-built-in ID를 `agent_profiles`에 INSERT | `BUILTIN_PROFILE_SPACE_VIOLATION` |
+| `agent_employments_initial_state` | `state<>'draft'`이거나 `active_version`·`last_active_version`이 NULL이 아닌 INSERT | `AGENT_EMPLOYMENT_INITIAL_STATE` |
+| `agent_employments_transition_guard` | 허용 7개 밖의 `state` UPDATE | `INVALID_STATE_TRANSITION` |
+| `agent_employments_arca_blocked` | `arca`를 `active`로 바꾸는 UPDATE | `ARCA_ACTIVATION_BLOCKED` |
+| `agent_employments_append_only_delete` | DELETE | `AGENT_EMPLOYMENT_APPEND_ONLY` |
+| `hire_proposals_transition_guard` | 허용 밖 `status` UPDATE | `INVALID_STATE_TRANSITION` |
+| `hire_proposals_append_only_delete` | DELETE | `HIRE_PROPOSALS_APPEND_ONLY` |
+
+`agent_profiles_builtin_space`는 built-in ID의 **신규 version INSERT는 정상 통과**시키므로 기존 version 추가·import 경로에 영향이 없다.
+
+**계층 책임 경계.** DB가 강제하는 것은 초기 상태(모든 신규 employment는 `draft`)와 전이 합법성까지다. **승인 여부**와 **version 존재성**은 서비스 계층이 강제한다. `draft→active`는 매트릭스상 합법 전이이므로 DB만으로는 승인된 활성화와 직접 SQL 활성화를 구분할 수 없다. 이 경계를 과대 서술하지 않는다.
+
+**Arca 활성화 차단(M3 한정).** DB trigger, 도메인 서비스, API 세 계층에서 막는다. arca guard는 전이 매트릭스 검사보다 **먼저** 평가하므로 arca에 대한 `hire`·`rehire`·`resume`은 현재 상태와 무관하게 항상 `422 VALIDATION_FAILED`다. 해제는 별도 계획과 독립 검토를 요구한다.
+
+**INSERT 경로의 오류명은 계약이 아니다.** arca의 `state='active'` INSERT 조건은 `AGENT_EMPLOYMENT_INITIAL_STATE` 조건의 진부분집합이라 두 trigger가 동시에 매치할 수 있고 SQLite는 발화 순서를 정의하지 않는다. INSERT 경로에서는 거부 여부만 계약이며 특정 오류명을 기대하지 않는다. UPDATE 경로의 `ARCA_ACTIVATION_BLOCKED`는 단일 매치이므로 결정적이다.
+
+**등록 상한.** `MAX_REGISTERED_AGENTS = 64`는 DB 제약이 아니라 서버 설정 상수(`config.ts`)로 둔다. 계상 기준은 상태와 무관한 `agent_definitions` 전체 row 수(누적 생성 high-water mark)이며, 정의가 append-only라 **해고해도 슬롯이 회수되지 않는다**. 초과 생성 요청은 `422 VALIDATION_FAILED`이고 상향은 설정 변경과 별도 승인 대상이다.
+
+**Verify guard.** 0002·0004·0006과 동일한 패턴으로 seed 직후 임시 검증 trigger를 세워 정의 18, employment 18, `active` 17(`active_version=2`), arca `draft`, `agent_profiles` 36 rows, `agent_profile_versions` 0 rows를 원자적으로 확인하고 즉시 제거한다.
 
 ## 8. REST 및 SSE 인터페이스
 
@@ -395,6 +532,14 @@ SSE `id`는 RunEvent sequence를 사용한다. 브라우저 재연결 시 `Last-
 | POST | `/api/v1/agents/:id/versions` | 새 버전 생성 |
 | POST | `/api/v1/agents/import` | JSON/YAML 검증·가져오기 |
 | GET | `/api/v1/agents/export?format=json|yaml` | 현재 프로필 내보내기 |
+| POST | `/api/v1/agents` | 신규 정의와 최초 프로필 version 생성(M3, 요청이 `origin`을 지정할 수 없음) |
+| GET | `/api/v1/agents/:id` | 단일 조회(활성 version 포함) |
+| POST | `/api/v1/agents/:id/employment` | 고용 상태 전이(M3) |
+| POST | `/api/v1/hire-proposals` | 채용 제안 등록(M3) |
+| GET | `/api/v1/hire-proposals`, `/api/v1/hire-proposals/:id` | 제안 조회 |
+| POST | `/api/v1/hire-proposals/:id/decision` | 제안 승인·거절 |
+
+M3의 workforce endpoint 시맨틱, 요청 필드, 오류 매핑은 `orion-console-api-event-adapter-contract.md` §5.3이 기준이다. `GET /api/v1/agents`는 각 에이전트의 `origin`, 고용 상태, 모델 선택의 default/override 여부를 함께 반환한다. 이 endpoint들은 M3에서 headless로만 제공하며 UI는 M5다.
 
 ### 8.4 과제·실행
 
@@ -432,6 +577,8 @@ SSE `id`는 RunEvent sequence를 사용한다. 브라우저 재연결 시 `Last-
 | Claude Fable 5 | Iris |
 | Claude Opus 4.8 | Ledger, Sentinel, Helios, Regula |
 | Claude Sonnet 5 | Nova, Forge, Luma, Keystone, Nexus |
+
+이 표는 기본 내장 18개의 카탈로그 권장값이며 `selectionMode: "default"`, `selectionSource: "catalog"`에 해당한다. 사용자 또는 최고관리 에이전트가 지정한 override는 §6.7의 `RuntimeSelection`으로 새 프로필 version에 기록되며, override도 provider registry 검증과 자료 등급·provider policy 재검사를 거치고 권한 상한을 넓히지 못한다. custom 에이전트는 이 표에 포함되지 않는다.
 
 ### 9.2 기본 대체 순서
 
@@ -1088,6 +1235,7 @@ Codex와 Claude 실행을 동일한 이벤트·결과 계약으로 제어한다.
 - Markdown 편집기, 버전 diff, 이전 버전 복원
 - JSON/YAML import/export와 schema validation
 - 프로젝트별 에이전트·공급자 허용 정책
+- Agent Workforce 도메인(§6.7)과 migration 0007(§7.3), custom 에이전트 registry, 고용 상태 전이 service, Default/Override 모델 정책, SOUL/HARNESS 분리 version·hash·스냅샷, 채용 제안 backend와 headless API. UI는 TS08 이후(M5)이며 M3에서는 화면을 만들지 않는다.
 
 **검증 방법**
 
@@ -1095,6 +1243,7 @@ Codex와 Claude 실행을 동일한 이벤트·결과 계약으로 제어한다.
 - 버전 생성·복원·실행 스냅샷 불변성 테스트
 - 악성 YAML, unknown field, 중복 ID, 빈 SOUL 가져오기 실패
 - 기밀 프로젝트의 Fable 자동 차단 확인
+- Agent Workforce 수용 기준 `WFM-001`~`WFM-032` 전수(`orion-console-test-evaluation-plan.md` §3.3)
 
 **체크리스트**
 
@@ -1103,6 +1252,10 @@ Codex와 Claude 실행을 동일한 이벤트·결과 계약으로 제어한다.
 - [ ] import 전에 전체 검증하고 부분 적용하지 않음
 - [ ] export 후 재import 시 정보 손실 없음
 - [ ] 권한 템플릿을 UI에서 명확히 표시
+- [ ] built-in "정확히 18개" 검증이 유지되고 custom 에이전트가 카탈로그 파일에 추가되지 않음
+- [ ] 해고 전후 정의·version·Run 스냅샷 row 수와 내용이 불변
+- [ ] 승인 없는 활성화 0건, 승인 없는 spawn 0건
+- [ ] Arca가 어떤 경로로도 `active`가 되지 않음
 
 **평가 기준**
 

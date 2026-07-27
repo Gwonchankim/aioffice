@@ -30,6 +30,8 @@ Technical Specification §20 uses TS00 through TS10.
 
 Workflow phases are P1 PLAN, P2 REVIEW, P3 IMPLEMENT, P4 VALIDATE, and P5 COMPLETE.
 
+M3 Agent Workforce(기본 내장 18개와 custom 에이전트의 분리, 고용·해고·재고용, Default/Override 모델 선택, SOUL/HARNESS 분리, 채용 제안과 승인)는 위 13개 문서에 나누어 기술한다. 각 판단의 기준 문서는 §4의 Source of Truth 표를 따르며, 세 개념(정의 · 프로필 version · 고용 상태)을 혼용해 해석하지 않는다. M3는 backend와 headless API까지이고 관리 UI는 M5, 실제 모델 기반 제안 작성과 상시 위임은 M5 이후다.
+
 ## 3. 권장 읽기 순서
 
 ### 3.1 의사결정자·제품 책임자
@@ -69,7 +71,12 @@ Workflow phases are P1 PLAN, P2 REVIEW, P3 IMPLEMENT, P4 VALIDATE, and P5 COMPLE
 | 런타임 구성요소, 상태 전이, 스케줄링, 저장 구조 | 상세 기술 명세서 |
 | 에이전트 이름·ID·역할·모델·행동 원칙·평가 기준 | Agent Catalog & SOUL |
 | 모델 계열 특성, 역할별 모델 배정 근거, 모델 재평가 | Model Selection Rationale |
+| 모델 선택의 Default/Override provenance | Model Selection Rationale §5.1 |
 | 프로필 파일의 필드·타입·검증·버전 형식 | Agent Profile Format |
+| SOUL과 HARNESS의 구분, 합성 순서, 내보내기 패키지 구성 | Agent Profile Format §6.1, §7, §9 |
+| 에이전트 정의·프로필 version·고용 상태의 분리와 DB 스키마 | 상세 기술 명세서 §6.7, §7.3 |
+| 에이전트 고용·해고·재고용·채용 제안의 API 계약 | API, Event & CLI Adapter Contract §5.3 |
+| 채용 제안의 승인 불변조건과 승인 없는 활성화 금지 | Security, Permission & Data Classification §8.4 |
 | 프론트엔드와 백엔드 및 CLI 어댑터 사이의 데이터 계약 | API, Event & CLI Adapter Contract |
 | 허용·차단·승인·자료 반출·보존과 관련된 모든 판단 | Security, Permission & Data Classification |
 | 화면 구조, 상태 표현, 조작 흐름, 접근성 | UI/UX Specification |
@@ -95,7 +102,8 @@ Workflow phases are P1 PLAN, P2 REVIEW, P3 IMPLEMENT, P4 VALIDATE, and P5 COMPLE
 | 실행 환경 | Windows 로컬, 단일 사용자, `127.0.0.1` 바인딩 |
 | Provider | Codex CLI, Claude Code CLI |
 | 인증 | 각 CLI의 기존 로그인 세션 사용, API Key 자체 저장 금지 |
-| 등록 에이전트 | 18개 |
+| 등록 에이전트 | 기본 내장 18개 고정(로더의 "정확히 18개" 검증 유지) + custom 에이전트. 전체 누적 등록 상한은 운영 상한 `MAX_REGISTERED_AGENTS = 64`이며 해고해도 슬롯이 회수되지 않는다 |
+| 한 계획의 최대 distinct agent | 12개(등록 상한과 독립) |
 | 전체 동시 실행 | 최대 8개 |
 | Provider 기본 soft cap | Codex 4개, Claude 4개 |
 | Provider 일시 차용 | 유휴 슬롯이 있으면 Provider당 최대 6개 |
@@ -148,7 +156,7 @@ Workflow phases are P1 PLAN, P2 REVIEW, P3 IMPLEMENT, P4 VALIDATE, and P5 COMPLE
 ## 9. 문서 완료 정의
 
 - 인덱스를 제외한 13개 기준 문서가 모두 존재하고 링크가 유효하다.
-- 18개 에이전트의 이름, 역할, 모델, 권한, `SOUL.md`, 평가 기준이 카탈로그에 있다.
+- 18개 기본 내장 에이전트의 이름, 역할, 모델, 권한, `SOUL.md`, 평가 기준이 카탈로그에 있고 custom 에이전트와의 경계가 명시되어 있다.
 - 프로필, API, 이벤트, 어댑터 계약이 구현 가능한 수준으로 타입과 오류를 정의한다.
 - 보안 문서가 자료 등급, 승인 경계, 비밀정보, 파일·Git·명령 정책을 포함한다.
 - PRD 기능 요구사항이 시험 계획의 사례와 추적된다.

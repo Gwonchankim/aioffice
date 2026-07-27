@@ -51,6 +51,9 @@ After `pnpm install --frozen-lockfile`, run `pnpm typecheck`, `pnpm test`, and `
 | FR-014 90일 보존 | DAT-001~010 | Integration/Security | O |
 | FR-015 프로필 import/export | AGT-009~018 | Unit/E2E/Security | O |
 | FR-016 비용 미추정 | USE-001~004 | Unit/E2E | O |
+| FR-017 custom 에이전트 고용·해고·재고용 | WFM-002~010, WFM-018, WFM-023, WFM-025, WFM-029, WFM-031 | Unit/Integration | O |
+| FR-018 Default/Override 모델 선택 | WFM-011~013, WFM-021 | Unit/Integration | O |
+| FR-019 제안·승인 분리 | WFM-019, WFM-020, WFM-022, WFM-027, WFM-028 | Unit/Integration/Security | O |
 ### 3.1 M1 실행 증거
 
 | 영역 | M1 ID와 필수 증거 |
@@ -92,6 +95,47 @@ M1에서 ARCA-003~014는 metadata-only implementation evidence로 전환한다. 
 | ARCA-015 | Nexus·specialist typed project/requester/purpose context와 구조화된 허용 결과 또는 source-specific generic missing, source-independent scope denial만 허용 | M3, M5 |
 | ARCA-016 | M0은 문서·로드맵 계약만 제공하고 모든 구현은 M1-M5에 배치하며 health가 Arca/DB/scheduler/retention을 운영 상태로 표시하지 않음 | M1-M5 (M0 runtime 없음) |
 
+
+### 3.3 M3 Agent Workforce 수용 기준 (WFM-001~032)
+
+아래 32개는 **M3 종료 게이트의 수용 기준**이며 전수 통과가 필수다. 실제 모델을 호출하지 않고 결정론적 fixture와 in-memory/임시 SQLite로 검증한다. 관련 SoT는 `orion-console-agent-profile-format.md` §6.1·§7·§9, `orion-console-api-event-adapter-contract.md` §5.3, `orion-console-technical-specification.md` §6.7·§7.3, `orion-console-security-permission-model.md` §8.4다.
+
+| ID | 수용 기준 | 계층 |
+|---|---|---|
+| WFM-001 | migration 0007 적용 후에도 `agent_profiles` 36 rows·`config_sha256`·seed 순서가 전부 불변이고 기본 18개 로더가 PASS | Integration |
+| WFM-002 | custom 에이전트 생성 직후 `agent_definitions`(origin=`user_created`) 1건, `agent_profile_versions` v1 1건, `agent_employments`는 `state='draft'` ∧ `active_version IS NULL`. 조회 API가 origin과 고용 상태를 그대로 노출 | Integration |
+| WFM-003 | 기본 내장 ID로 custom 생성 시 `VALIDATION_FAILED`, DB row 0 | Unit/Integration |
+| WFM-004 | 기존 version UPDATE·DELETE 시도는 trigger 거부, 변경은 version+1 신규 row | Integration |
+| WFM-005 | 4상태 순서쌍 16개 중 허용 7개는 성공하고 나머지 9개(자기 전이 4개 포함)는 DB trigger와 서비스 양쪽에서 거부. `active` 결과에는 항상 `active_version IS NOT NULL`. `state='active'` row 직접 INSERT는 `AGENT_EMPLOYMENT_INITIAL_STATE`로 거부(대상은 `arca` 이외 에이전트) | Integration |
+| WFM-006 | 해고 전후 row 수와 내용 불변: `agent_definitions`·`agent_profile_versions`·`agent_profiles`·`runs`·`planning_runs`의 `(id, sha256)` 집합 동일, `audit_log`는 해고 이벤트 1건만 증가 | Integration |
+| WFM-007 | 실행 중 planning_run·run 스냅샷이 새 version과 해고에 영향받지 않음 | Integration |
+| WFM-008 | inactive 에이전트가 planner roster와 prompt에서 제외 | Integration |
+| WFM-009 | inactive 에이전트 대상 scheduler spawn 0(계획 단계 거부 포함) | Integration |
+| WFM-010 | `retired → active` 재고용 후 신규 Plan에서 다시 선택 가능 | Integration |
+| WFM-011 | `selectionMode`·`selectionSource`가 API와 스냅샷에 정확히 노출되고 카탈로그 기본값은 `default` | Unit/Integration |
+| WFM-012 | 미등록·미지원 (provider, model, effort) 조합 저장 거부, `unavailable` 모델은 저장 가능·실행 불가 | Unit/Integration |
+| WFM-013 | Run 스냅샷에 effective provider/model/effort + `selectionSource` + fallback 사유 기록 | Integration |
+| WFM-014 | SOUL과 HARNESS가 별도 필드·별도 hash로 저장되고 서로 섞이지 않음 | Unit |
+| WFM-015 | HARNESS 정규화 hash가 CRLF·NFC 차이에 불변, 변경 시 새 version | Unit |
+| WFM-016 | 기존 SOUL policy guard 3개 패턴에 HARNESS 전용 3개 패턴(권한 상한 확대·승인 게이트 생략·시스템 프롬프트 우선순위 역전)을 추가하고, 패턴별 positive fixture 1개와 부정문 negative fixture 1개로 저장·import 양쪽 경로의 거부·통과를 각각 단언 | Unit/Security |
+| WFM-017 | JSON/YAML/ZIP round-trip 후 profile·SOUL·HARNESS 내용과 hash 동일. built-in과 custom 두 경로를 각각 단언하며 custom round-trip은 union read model을 통한 존재 판정·version 순차 검사·export 선정을 거침 | Integration |
+| WFM-018 | 사용자 직접 고용 end-to-end(생성 → 활성화 → planner 사용 가능) | Integration |
+| WFM-019 | fake manager가 HireProposal을 작성하고 서버 검증 결과가 제안에 기록됨 | Integration |
+| WFM-020 | 승인 전 활성화 0·spawn 0. 거절·만료·hash 변경 제안은 승인 불가 | Integration/Security |
+| WFM-021 | 권한 상한 초과 제안·생성·import 전부 거부 | Unit/Security |
+| WFM-022 | 고용·해고·재고용·override·제안 결정마다 기존 `audit_log`에 1건 append되고 UPDATE·DELETE는 `AUDIT_APPEND_ONLY`로 거부. payload에 secret과 raw prompt 미포함 | Integration/Security |
+| WFM-023 | 0007 fresh·upgrade에서 데이터 손실 0: 기존 36 rows의 `(id, version, config_sha256)` 집합이 적용 전후 동일. 재적용은 (a) `applyMigrations()` 2회 호출 시 `schema_migrations` 기준 skip, (b) 0006 SQL 본문 직접 재실행 시 `INSERT OR IGNORE` 흡수와 0007 trigger 미발화를 분리 단언 | Integration |
+| WFM-024 | 동일 `Idempotency-Key` 재요청은 동일 응답, 잘못된 `expectedRevision`은 `409 INVALID_STATE_TRANSITION` | Integration |
+| WFM-025 | custom collaborator 미존재·자기 참조·cycle·`retired` 참조 거부 | Unit |
+| WFM-026 | 기존 M3 테스트 회귀 0 | Unit/Integration |
+| WFM-027 | UI·무승인 자동화 부재를 측정: (a) web 소스와 route registry에 workforce 컴포넌트·라우트 0건, (b) 승인 없이 `state='active'`로 전이시키는 코드 경로 0건(제안 경로의 활성화는 승인 레코드를 인자로 요구함을 타입·테스트로 단언), (c) 저장소에 standing delegation·자동 승인 설정 키 0건 | Unit/Security |
+| WFM-028 | Arca 활성화 차단: (a) `hire`·`rehire`·`resume` 3개 요청이 각각 `422 VALIDATION_FAILED`, (b) 직접 SQL `UPDATE`가 `ARCA_ACTIVATION_BLOCKED`로 ABORT, (c) 모든 시도 후 `state='draft'`·`active_version IS NULL` 유지 | Integration/Security |
+| WFM-029 | `agent_definitions` row 수(상태 무관)가 `MAX_REGISTERED_AGENTS`에 도달하면 신규 생성이 `422 VALIDATION_FAILED`로 거부되고, 해고된 에이전트도 계상에 포함됨 | Integration |
+| WFM-030 | id 공간 분리와 union 유일성: (a) `agent_profile_versions`에 built-in id 삽입이 `CUSTOM_VERSION_SPACE_VIOLATION`, (b) `agent_profiles`에 custom id 삽입이 `BUILTIN_PROFILE_SPACE_VIOLATION`, (c) built-in 신규 version INSERT는 정상 성공, (d) union 조회에 중복 `(id, version)` 0건 | Integration |
+| WFM-031 | version 복원 규칙: hire·suspend·resume·dismiss·rehire 각각에 대해 `active_version`·`last_active_version`이 규정대로 변하고 `resume`이 중단 중 생성된 새 version으로 자동 승격하지 않음. 추가로 (a) `draft → dismiss → rehire(version 미지정)`이 422로 거부되고 DB CHECK가 `state='active' ∧ active_version IS NULL` 저장을 차단, (b) union version 집합에 없는 번호로 hire·rehire하면 `422 VALIDATION_FAILED`, (c) `version` 없는 `hire`가 `422 VALIDATION_FAILED` | Integration |
+| WFM-032 | origin 무결성: (a) `agent_definitions` UPDATE·DELETE가 `AGENT_DEFINITION_APPEND_ONLY`, (b) seed 이후 `origin='builtin'` INSERT가 `BUILTIN_ORIGIN_SEED_ONLY`, (c) 요청 본문에 `origin`이 포함되면 strict schema가 `422 VALIDATION_FAILED`로 거부하고 정상 경로에서는 서버가 경로에 따라 origin을 결정 | Integration |
+
+M3 종료 판정은 위 32개 전수 통과에 더해 기본 18개 profile round-trip, custom 에이전트 round-trip, SOUL/HARNESS round-trip, 해고 후 spawn 0, 실행 중 스냅샷 불변, 동시 hire/dismiss 충돌, 승인 전 제안 spawn 0, permission escalation 0, provider·model·effort 우회 0, migration 데이터 손실 0을 함께 요구한다.
 
 ## 4. 테스트 데이터 원칙
 
@@ -149,6 +193,7 @@ M0에는 아래 계약의 실행 fixture나 registry runtime이 없으며, M1-M5
 - AGT-016 부분 import 없음
 - AGT-017 version conflict 처리
 - AGT-018 공통 안전 정책 약화 SOUL 거부
+- WFM-001~032 M3 Agent Workforce 수용 기준(§3.3). 기본 18개 대상 AGT 사례를 대체하지 않고 custom 에이전트·고용 상태·HARNESS·채용 제안 영역을 추가로 덮는다.
 
 ### 5.4 Plan — PLN
 
@@ -428,6 +473,7 @@ Critical·High 결과가 하나라도 남으면 출시를 차단한다.
 - [ ] 승인 우회·중복 실행 검증
 - [ ] controlled data process spawn 0 검증
 - [ ] 18개 agent 대표 평가 과제 실행
+- [ ] WFM-001~032 전수 통과와 승인 전 활성화·spawn 0 검증
 - [ ] 8개 병렬·100k event 성능 기준 충족
 - [ ] restart·retention·worktree recovery 검증
 - [ ] P0 E2E 100%, 핵심 coverage 80% 이상
