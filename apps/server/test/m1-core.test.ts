@@ -94,7 +94,7 @@ describe('M1 database repositories', () => {
     applyMigrations(handle.database);
     expect(
       handle.database.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get(),
-    ).toMatchObject({ count: 6 });
+    ).toMatchObject({ count: 7 });
     expect(
       handle.database
         .prepare('SELECT COUNT(*) AS count FROM agent_profiles WHERE enabled = 0')
