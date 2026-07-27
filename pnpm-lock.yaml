@@ -65,6 +65,9 @@ importers:
       ulid:
         specifier: ^2.3.0
         version: 2.4.0
+      yaml:
+        specifier: 2.9.0
+        version: 2.9.0
     devDependencies:
       '@orion/test-fixtures':
         specifier: workspace:*
