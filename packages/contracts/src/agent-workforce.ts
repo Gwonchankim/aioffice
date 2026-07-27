@@ -237,6 +237,31 @@ export const hireProposalStatusSchema = z.enum([
  * activate anything by itself: activation requires an explicit user decision
  * that re-states `proposalSha256` (Security §8.3, DEC-030).
  */
+/**
+ * Per-status field expectations. `null` means "must be null", `'set'` means
+ * "must not be null"; every status is listed, so an unhandled status is a
+ * compile error rather than a silently permitted combination.
+ *
+ * Expiry is an automatic transition, not a user decision: `expired` records
+ * when expiry was settled in `decidedAt` and leaves `decidedBy` null. The
+ * expiry instant itself is already carried by `expiresAt`.
+ */
+const hireProposalStatusInvariants: Record<
+  HireProposalStatus,
+  {
+    readonly decidedAt: 'set' | null;
+    readonly decidedBy: 'set' | null;
+    readonly activatedVersion: 'set' | null;
+  }
+> = {
+  pending_approval: { decidedAt: null, decidedBy: null, activatedVersion: null },
+  approved: { decidedAt: 'set', decidedBy: 'set', activatedVersion: null },
+  rejected: { decidedAt: 'set', decidedBy: 'set', activatedVersion: null },
+  invalidated: { decidedAt: 'set', decidedBy: 'set', activatedVersion: null },
+  expired: { decidedAt: 'set', decidedBy: null, activatedVersion: null },
+  activated: { decidedAt: 'set', decidedBy: 'set', activatedVersion: 'set' },
+};
+
 export const hireProposalSchema = z
   .object({
     id: ulidSchema,
@@ -249,30 +274,43 @@ export const hireProposalSchema = z
     expiresAt: utcIso8601Schema,
     decidedAt: utcIso8601Schema.nullable(),
     decidedBy: nfcStringSchema(1, 64).nullable(),
+    activatedAgentId: agentIdSchema.nullable(),
     activatedVersion: positiveSafeIntegerSchema.nullable(),
   })
   .strict()
   .superRefine((proposal, context) => {
-    const decided = proposal.status !== 'pending_approval';
-    if (decided && proposal.decidedAt === null && proposal.status !== 'expired') {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'A decided proposal requires a decision timestamp.',
-        path: ['decidedAt'],
-      });
+    const expected = hireProposalStatusInvariants[proposal.status];
+    const actual = {
+      decidedAt: proposal.decidedAt,
+      decidedBy: proposal.decidedBy,
+      activatedVersion: proposal.activatedVersion,
+    };
+
+    for (const field of ['decidedAt', 'decidedBy', 'activatedVersion'] as const) {
+      const requirement = expected[field];
+      const value = actual[field];
+      if (requirement === null && value !== null) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `A "${proposal.status}" proposal cannot carry ${field}.`,
+          path: [field],
+        });
+      }
+      if (requirement === 'set' && value === null) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `A "${proposal.status}" proposal requires ${field}.`,
+          path: [field],
+        });
+      }
     }
-    if (proposal.status === 'pending_approval' && proposal.decidedAt !== null) {
+
+    // The activated agent and the activated version are recorded together.
+    if ((proposal.activatedAgentId === null) !== (proposal.activatedVersion === null)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'A pending proposal cannot carry a decision timestamp.',
-        path: ['decidedAt'],
-      });
-    }
-    if (proposal.status !== 'activated' && proposal.activatedVersion !== null) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Only an activated proposal records an activated version.',
-        path: ['activatedVersion'],
+        message: 'An activation records both the activated agent and its version.',
+        path: ['activatedAgentId'],
       });
     }
   });

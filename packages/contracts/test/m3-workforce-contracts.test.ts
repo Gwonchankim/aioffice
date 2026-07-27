@@ -63,10 +63,14 @@ function proposal(overrides: Record<string, unknown> = {}) {
     expiresAt: '2026-07-27T00:30:00.000Z',
     decidedAt: null,
     decidedBy: null,
+    activatedAgentId: null,
     activatedVersion: null,
     ...overrides,
   };
 }
+
+const decided = { decidedAt: iso, decidedBy: 'local-user' };
+const activation = { activatedAgentId: 'zeta', activatedVersion: 1 };
 
 describe('WFM agent id contract', () => {
   it('follows Agent Profile Format §4 (2-32 characters) and keeps every built-in id valid', () => {
@@ -281,29 +285,51 @@ describe('WFM profile version and harness contracts', () => {
 });
 
 describe('WFM hire proposal contract', () => {
-  it('keeps a pending proposal undecided and an activation version exclusive to activation', () => {
+  it('accepts exactly one field combination per status', () => {
     expect(hireProposalSchema.parse(proposal())).toMatchObject({ status: 'pending_approval' });
-    expect(hireProposalSchema.safeParse(proposal({ decidedAt: iso })).success).toBe(false);
+    for (const status of ['approved', 'rejected', 'invalidated'] as const) {
+      expect(hireProposalSchema.parse(proposal({ status, ...decided }))).toMatchObject({ status });
+    }
+    // Expiry is automatic, so it is timestamped but has no deciding user.
+    expect(hireProposalSchema.parse(proposal({ status: 'expired', decidedAt: iso }))).toMatchObject(
+      {
+        status: 'expired',
+        decidedBy: null,
+      },
+    );
     expect(
-      hireProposalSchema.safeParse(
-        proposal({
-          status: 'approved',
-          decidedAt: iso,
-          decidedBy: 'local-user',
-          activatedVersion: 1,
-        }),
-      ).success,
-    ).toBe(false);
-    expect(
-      hireProposalSchema.parse(
-        proposal({
-          status: 'activated',
-          decidedAt: iso,
-          decidedBy: 'local-user',
-          activatedVersion: 1,
-        }),
-      ),
+      hireProposalSchema.parse(proposal({ status: 'activated', ...decided, ...activation })),
     ).toMatchObject({ status: 'activated', activatedVersion: 1 });
+  });
+
+  it('rejects every invalid status/field combination', () => {
+    const invalid: readonly Record<string, unknown>[] = [
+      // activated must carry a decision and an activation.
+      { status: 'activated', ...decided },
+      { status: 'activated', decidedBy: 'local-user', ...activation },
+      { status: 'activated', decidedAt: iso, ...activation },
+      // pending must be entirely undecided.
+      { decidedBy: 'local-user' },
+      { decidedAt: iso },
+      { ...activation },
+      // a user decision requires the deciding user.
+      { status: 'approved', decidedAt: iso },
+      { status: 'rejected', decidedAt: iso },
+      { status: 'invalidated', decidedAt: iso },
+      // expiry is never attributed to a user.
+      { status: 'expired', ...decided },
+      // only an activation records an activated version.
+      { status: 'approved', ...decided, ...activation },
+      { status: 'rejected', ...decided, ...activation },
+      { status: 'invalidated', ...decided, ...activation },
+      { status: 'expired', decidedAt: iso, ...activation },
+      // the activated agent and version are recorded together.
+      { status: 'activated', ...decided, activatedAgentId: 'zeta', activatedVersion: null },
+      { status: 'activated', ...decided, activatedAgentId: null, activatedVersion: 1 },
+    ];
+    for (const overrides of invalid) {
+      expect(hireProposalSchema.safeParse(proposal(overrides)).success).toBe(false);
+    }
   });
 
   it('binds a decision to the exact proposal hash', () => {

@@ -167,7 +167,24 @@ multipart zip 또는 JSON/YAML bundle을 받는다. dryRun query가 true면 저�
 
 #### `GET /api/v1/agents/export?format=yaml&includeHistory=false`
 
-checksum이 포함된 zip을 반환한다.
+checksum이 포함된 zip을 반환한다. 기본값은 agent별 최신 full version이며 고용 상태로 필터링하지 않는다. entry 상한 초과는 `422 VALIDATION_FAILED`다.
+
+#### Agent Workforce endpoint (M3)
+
+`GET /api/v1/agents`는 각 agent의 `origin`(builtin | user_created | manager_proposed | imported), 고용 상태(draft | active | suspended | retired), 모델 선택이 default인지 override인지를 함께 반환한다. 목록 endpoint는 §3의 pagination 규칙(기본 50, 최대 200, opaque cursor)을 따른다.
+
+| Method | Path | 설명 |
+|---|---|---|
+| `POST` | `/api/v1/agents` | 신규 agent definition과 최초 profile version을 만든다. 요청 본문은 `origin`을 지정할 수 없다(서버가 경로로 결정하며 strict schema가 unknown field를 거부한다). |
+| `GET` | `/api/v1/agents/:id/versions` | version 이력. |
+| `POST` | `/api/v1/agents/:id/employment` | `action ∈ {hire, dismiss, rehire, suspend, resume}` + `expectedRevision`(optimistic concurrency). `hire`는 활성화할 `version`이 필수이고 `rehire`는 선택이며 나머지 action은 `version`을 받지 않는다. 서버는 최신 version을 자동 선택하지 않는다. |
+| `POST` | `/api/v1/hire-proposals` | 최고관리 Agent가 작성한 채용 제안을 등록한다. 제안만으로는 어떤 agent도 활성화되지 않는다. |
+| `GET` | `/api/v1/hire-proposals`, `/api/v1/hire-proposals/:id` | 제안 조회. |
+| `POST` | `/api/v1/hire-proposals/:id/decision` | `decision ∈ {approve, reject}` + `proposalSha256` 재확인. 대상 hash가 바뀌면 기존 승인은 무효다(Security §8.3). |
+
+오류 코드는 §4의 기존 코드를 사용한다: 허용되지 않은 고용 전이와 `expectedRevision` 불일치는 `409 INVALID_STATE_TRANSITION`, schema·권한 상한·등록 상한 위반은 `422 VALIDATION_FAILED`, 승인되지 않은 제안의 활성화 시도는 `423 APPROVAL_REQUIRED`다. 신규 오류 코드는 추가하지 않는다.
+
+고용·해고·재고용·모델 override·제안 결정은 모두 `audit_log`에 `agent.*` action으로 append한다.
 
 ### 5.4 Task
 

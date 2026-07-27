@@ -244,6 +244,28 @@ SOUL hash는 CRLF를 LF로, Unicode를 NFC로 정규화한 UTF-8 bytes에 SHA-25
 Arca의 Full SOUL은 Catalog §4.18과 동일한 완전한 본문이어야 하며, 일부만 profile에 복사하거나 축약해서는 안 된다. `soulSha256`은 그 Full SOUL을 CRLF->LF, Unicode NFC로 정규화한 UTF-8 bytes의 SHA-256으로 계산한다. M0에서는 이 미래 Arca SOUL/profile을 seed, load 또는 실행하지 않는다.
 
 
+### 6.1 HARNESS.MD 규격 (M3 Agent Workforce)
+
+SOUL.MD가 정체성·역할·판단 원칙·행동 성향을 담는 반면 HARNESS.MD는 **실행 절차**를 담는다.
+
+```md
+# 작업 절차
+# 도구 사용 규칙
+# 출력 형식
+# 검증 체크리스트
+# 중단 조건
+```
+
+- SOUL과 **별도 파일·별도 hash**로 관리한다: `harnessPath`, `harnessSha256`.
+- 정규화·해시 규칙은 §6의 SOUL과 동일하다(CRLF→LF, Unicode NFC, UTF-8 bytes SHA-256).
+- 프로필 version에서 **선택 필드**다. 없으면 permission template별 canonical default harness를 사용하며, Run snapshot에는 실제 사용된 본문·hash와 출처(`profile` | `template-default`)를 함께 저장한다.
+- 기존 version을 수정하지 않는다. HARNESS 변경은 §8에 따라 새 version을 만든다.
+- §6의 SOUL 금지 사항이 HARNESS에도 그대로 적용된다. 추가로 다음을 금지한다.
+  - 권한 상한을 확대하라는 지시
+  - 승인 게이트를 생략하라는 지시
+  - 시스템 프롬프트 우선순위를 역전시키라는 지시
+- 사용자·모델이 작성한 HARNESS는 비신뢰 입력이며 저장·가져오기 양쪽에서 정책 검사를 통과해야 한다.
+
 ## 7. 런타임 프롬프트 합성 순서
 
 낮은 항목이 높은 항목을 덮어쓸 수 없도록 다음 순서로 합성한다.
@@ -251,9 +273,11 @@ Arca의 Full SOUL은 Catalog §4.18과 동일한 완전한 본문이어야 하�
 1. Orion Console 시스템 안전 정책
 2. 프로젝트 자료 등급·권한·허용 명령
 3. 공통 운영 원칙
-4. 에이전트 SOUL.MD
+4. 에이전트 SOUL.MD **및 HARNESS.MD**
 5. 에이전트별 Task objective와 acceptance criteria
 6. 읽기 전용 입력·이전 단계 산출물
+
+HARNESS.MD는 SOUL.MD와 같은 4순위다. 따라서 1~3순위를 약화할 수 없을 뿐 아니라, **서버가 생성하는 5순위 산출물(Task objective와 acceptance criteria)을 대체·약화·재정의할 수 없다.**
 
 프로젝트 파일의 AGENTS.md·CLAUDE.md는 CLI가 자체 로딩할 수 있으나 Orion Console 시스템 안전 정책을 약화할 수 없다.
 
@@ -277,8 +301,11 @@ agent-profiles-export-<timestamp>.zip
 ├─ manifest.yaml
 ├─ profiles/*.yaml
 ├─ souls/*.md
+├─ harnesses/*.md        # HARNESS를 가진 entry만
 └─ checksums.sha256
 ```
+
+manifest의 entry 항목은 `harnessPath`와 `harnessSha256`를 **선택 필드**로 가진다(상위 manifest가 아니라 entry 스키마의 확장이다). `checksums.sha256`은 HARNESS entry까지 포함한다. ZIP entry 총 수는 `2 + (프로필 수 × 2) + HARNESS를 가진 entry 수`와 **정확히 일치**해야 하며, 선언되지 않은 추가 entry는 거부한다.
 
 ### 9.2 가져오기 절차
 
@@ -292,6 +319,8 @@ agent-profiles-export-<timestamp>.zip
 8. 동일 `(id, version)` 내용이 같으면 skip, 다르면 conflict
 
 부분 import는 허용하지 않는다. conflict는 UI에서 새 version으로 가져오기 또는 취소만 제공한다.
+
+내보내기 기본값(`includeHistory=false`)은 agent별 **최신 full version**이며 고용 상태로 필터링하지 않는다. `includeHistory=true`의 결과가 manifest entry 상한을 초과하면 `422 VALIDATION_FAILED`와 초과 사실을 담은 안내를 반환하고, 원시 검증 오류나 500으로 노출하지 않는다.
 
 ## 10. 모델·공급자 검증
 
