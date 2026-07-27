@@ -13,6 +13,15 @@ const workspaceRoot = fileURLToPath(new URL('../../../', import.meta.url));
 
 export const DEFAULT_ASSET_ROOT = resolve(workspaceRoot, 'apps', 'web', 'dist');
 
+/**
+ * Operational cap on registered agents (plan-delta-003 §4, WFM-029): built-in 18
+ * plus custom headroom. It is a cumulative high-water mark over every
+ * `agent_definitions` row — dismissal never frees a slot — and is independent of
+ * the per-plan distinct-agent limit (12) and `maxAgentRuns` (60), neither of
+ * which it relaxes. Raising it is a configuration change plus separate approval.
+ */
+export const MAX_REGISTERED_AGENTS = 64;
+
 export interface ServerConfig {
   readonly assetRoot: string;
   readonly port: number;
