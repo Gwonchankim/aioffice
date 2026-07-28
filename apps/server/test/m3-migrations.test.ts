@@ -79,12 +79,12 @@ function insertTaskAndStep(
 }
 
 describe('M3 migrations 0004/0005', () => {
-  it('applies exactly 7 forward migrations and re-applies as a no-op', () => {
+  it('applies exactly 8 forward migrations and re-applies as a no-op', () => {
     const handle = setup();
     applyMigrations(handle.database);
     expect(
       handle.database.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get(),
-    ).toMatchObject({ count: 7 });
+    ).toMatchObject({ count: 8 });
     const before = handle.database
       .prepare('SELECT version, name, checksum FROM schema_migrations ORDER BY version')
       .all();

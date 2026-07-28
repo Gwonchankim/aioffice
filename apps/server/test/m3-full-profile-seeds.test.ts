@@ -49,12 +49,12 @@ interface AgentProfileRow {
 }
 
 describe('M3 full profile seeds (migration 0006)', () => {
-  it('applies exactly 7 migrations and seeds 36 total agent_profiles rows (18 v1 + 18 v2)', () => {
+  it('applies exactly 8 migrations and seeds 36 total agent_profiles rows (18 v1 + 18 v2)', () => {
     const handle = setup();
     applyMigrations(handle.database);
     expect(
       handle.database.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get(),
-    ).toMatchObject({ count: 7 });
+    ).toMatchObject({ count: 8 });
     expect(
       handle.database.prepare('SELECT COUNT(*) AS count FROM agent_profiles').get(),
     ).toMatchObject({ count: 36 });

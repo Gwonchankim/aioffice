@@ -74,7 +74,7 @@ describe('M3 workforce migration 0007', () => {
 
     expect(after).toEqual(before);
     expect(after).toHaveLength(36);
-    expect(count(database, 'SELECT COUNT(*) AS count FROM schema_migrations')).toBe(7);
+    expect(count(database, 'SELECT COUNT(*) AS count FROM schema_migrations')).toBe(8);
   });
 
   it('WFM-023: re-applying the migrations and re-executing 0006 stay no-ops', () => {
