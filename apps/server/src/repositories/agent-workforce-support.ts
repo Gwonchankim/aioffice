@@ -29,6 +29,10 @@ const WORKFORCE_CONFLICT_LABELS: readonly string[] = [
   'HIRE_PROPOSALS_APPEND_ONLY',
   'AUDIT_APPEND_ONLY',
   'INVALID_STATE_TRANSITION',
+  // Migration 0010: the create-only proposal envelope cannot be rewritten. It
+  // maps here rather than to a new public error code, so the API surface is
+  // unchanged and the caller still sees 409 INVALID_STATE_TRANSITION.
+  'HIRE_PROPOSAL_ENVELOPE_IMMUTABLE',
 ];
 
 /**

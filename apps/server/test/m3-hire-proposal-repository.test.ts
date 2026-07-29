@@ -306,15 +306,17 @@ describe('M3 HireProposalRepository — creation', () => {
       expect(name in HireProposalRepository.prototype).toBe(false);
     }
 
-    // Migration 0007 guards `status` transitions and forbids DELETE, but a
-    // generic UPDATE of the payload columns is something the database still
-    // accepts — which is precisely why the repository must be the guard. This
-    // asserts the boundary as it actually is, not as it would be convenient.
+    // Two layers now defend the create-only envelope. The repository exposes no
+    // generic mutator (above), and migration 0010 refuses an UPDATE of any of
+    // the ten immutable columns — `authored_by` among them — with an exact
+    // trigger label. Before 0010 the database accepted this write and the
+    // repository was the only guard; that is the boundary plan-delta-005 §7
+    // moved, so this asserts rejection rather than acceptance.
     expect(() =>
       harness.database
         .prepare("UPDATE hire_proposals SET authored_by = 'imposter' WHERE id = ?")
         .run(proposal.id),
-    ).not.toThrow();
+    ).toThrow(/HIRE_PROPOSAL_ENVELOPE_IMMUTABLE/);
     expect(() =>
       harness.database.prepare('DELETE FROM hire_proposals WHERE id = ?').run(proposal.id),
     ).toThrow(/HIRE_PROPOSALS_APPEND_ONLY/);

@@ -207,9 +207,9 @@ function attempt(database: Database, from: Status, to: Status): string | undefin
 }
 
 describe('M3 migration 0009 — hire proposal self-transition guard', () => {
-  it('applies 0001..0009 on a fresh database and leaves 0007 and 0008 byte-identical', () => {
+  it('applies 0001..0010 on a fresh database and leaves 0007 and 0008 byte-identical', () => {
     const database = setup();
-    expect(count(database, 'SELECT COUNT(*) AS count FROM schema_migrations')).toBe(9);
+    expect(count(database, 'SELECT COUNT(*) AS count FROM schema_migrations')).toBe(10);
 
     const applied = database
       .prepare('SELECT version, name FROM schema_migrations ORDER BY version')
@@ -382,7 +382,7 @@ describe('M3 migration 0009 — hire proposal self-transition guard', () => {
         .prepare('SELECT version, name, checksum FROM schema_migrations ORDER BY version')
         .all(),
     ).toEqual(appliedBefore);
-    expect(count(database, 'SELECT COUNT(*) AS count FROM schema_migrations')).toBe(9);
+    expect(count(database, 'SELECT COUNT(*) AS count FROM schema_migrations')).toBe(10);
     expect(count(database, 'SELECT COUNT(*) AS count FROM agent_employments')).toBe(18);
   });
 
