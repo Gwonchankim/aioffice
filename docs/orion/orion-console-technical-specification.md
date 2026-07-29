@@ -495,6 +495,17 @@ Run과 planning-run 시작 시 profile version, SOUL 본문·hash, HARNESS 본�
 
 **INSERT 경로의 오류명은 계약이 아니다.** arca의 `state='active'` INSERT 조건은 `AGENT_EMPLOYMENT_INITIAL_STATE` 조건의 진부분집합이라 두 trigger가 동시에 매치할 수 있고 SQLite는 발화 순서를 정의하지 않는다. INSERT 경로에서는 거부 여부만 계약이며 특정 오류명을 기대하지 않는다. UPDATE 경로의 `ARCA_ACTIVATION_BLOCKED`는 단일 매치이므로 결정적이다.
 
+**제안 자기 전이 거부 (migration 0009).** 0007의 `hire_proposals_transition_guard`는 `WHEN NEW.status <> OLD.status AND NOT (...)` 형태였다. 선행 항 때문에 같은 status로의 UPDATE가 RAISE에 도달하지 못해 **자기 전이 6개가 DB에서 통과**했다. `0009_m3_hire_proposal_self_transition_guard.sql`이 그 trigger를 **같은 이름으로 exact `DROP` 후 재생성**하며 선행 항만 제거한다. 허용 조건절은 0007에서 문자 단위로 옮기므로 허용 전이는 달라지지 않는다.
+
+status 6개의 순서쌍 **36개 = 허용 7 / 거부 29**이며, 거부 29에 자기 전이 6개가 전부 포함된다. `rejected`·`expired`·`activated`·`invalidated`는 종단이다.
+
+| from | to (허용) |
+|---|---|
+| `pending_approval` | `approved` · `rejected` · `expired` · `invalidated` |
+| `approved` | `activated` · `expired` · `invalidated` |
+
+`DROP TRIGGER`는 `IF EXISTS`를 쓰지 **않는다**. 선행 trigger 부재는 0007로부터의 drift이며 흡수하지 않고 표면화해야 한다 — SQLite가 `no such trigger`를 던지고 migration transaction이 원자적으로 rollback되어 `applyMigrations()`가 `MIGRATION_FAILED`로 fail-closed된다. SQLite는 `BEFORE UPDATE` trigger를 제약 평가보다 먼저 실행하므로 거부 쌍은 CHECK 오류가 아니라 `INVALID_STATE_TRANSITION`으로 표면화된다.
+
 **등록 상한.** `MAX_REGISTERED_AGENTS = 64`는 DB 제약이 아니라 서버 설정 상수(`config.ts`)로 둔다. 계상 기준은 상태와 무관한 `agent_definitions` 전체 row 수(누적 생성 high-water mark)이며, 정의가 append-only라 **해고해도 슬롯이 회수되지 않는다**. 초과 생성 요청은 `422 VALIDATION_FAILED`이고 상향은 설정 변경과 별도 승인 대상이다.
 
 **Verify guard.** 0002·0004·0006과 동일한 패턴으로 seed 직후 임시 검증 trigger를 세워 정의 18, employment 18, `active` 17(`active_version=2`), arca `draft`, `agent_profiles` 36 rows, `agent_profile_versions` 0 rows를 원자적으로 확인하고 즉시 제거한다.

@@ -145,9 +145,9 @@ function attempt(database: Database, from: State, to: State): string | undefined
 }
 
 describe('M3 migration 0008 — employment self-transition guard', () => {
-  it('applies 0001..0008 on a fresh database and leaves 0007 byte-identical', () => {
+  it('applies 0001..0009 on a fresh database and leaves 0007 byte-identical', () => {
     const database = setup();
-    expect(count(database, 'SELECT COUNT(*) AS count FROM schema_migrations')).toBe(8);
+    expect(count(database, 'SELECT COUNT(*) AS count FROM schema_migrations')).toBe(9);
 
     const applied = database
       .prepare('SELECT version, name FROM schema_migrations ORDER BY version')
@@ -169,6 +169,12 @@ describe('M3 migration 0008 — employment self-transition guard', () => {
     // apply 0008 and require the ONLY difference to be the body of the guard it
     // replaces. This covers the 0001..0006 triggers as well as the 0007 ones,
     // without depending on a hand-maintained name list.
+    //
+    // BOTH sides are pinned to a version, `before` at 0007 and `after` at 0008
+    // (plan-delta-005 §1). Leaving `after` as a full `setup()` would make this
+    // test measure whatever migration comes last instead of 0008: from 0009 on,
+    // a later trigger replacement would show up here as a difference this test
+    // attributes to 0008.
     const beforeDirectory = mkdtempSync(join(tmpdir(), 'orion-m3-transition-guard-triggers-'));
     cleanup.push(beforeDirectory);
     const beforeHandle = createDatabase(join(beforeDirectory, 'orion.db'));
@@ -181,8 +187,15 @@ describe('M3 migration 0008 — employment self-transition guard', () => {
       .prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' ORDER BY name")
       .all() as { name: string; sql: string }[];
 
-    const database = setup();
-    const after = database
+    const afterDirectory = mkdtempSync(join(tmpdir(), 'orion-m3-transition-guard-triggers-after-'));
+    cleanup.push(afterDirectory);
+    const afterHandle = createDatabase(join(afterDirectory, 'orion.db'));
+    handles.push(afterHandle);
+    applyMigrations(
+      afterHandle.database,
+      loadMigrations().filter((migration) => migration.version <= 8),
+    );
+    const after = afterHandle.database
       .prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' ORDER BY name")
       .all() as { name: string; sql: string }[];
 
@@ -406,7 +419,7 @@ describe('M3 migration 0008 — employment self-transition guard', () => {
         .prepare('SELECT version, name, checksum FROM schema_migrations ORDER BY version')
         .all(),
     ).toEqual(appliedBefore);
-    expect(count(database, 'SELECT COUNT(*) AS count FROM schema_migrations')).toBe(8);
+    expect(count(database, 'SELECT COUNT(*) AS count FROM schema_migrations')).toBe(9);
     expect(count(database, 'SELECT COUNT(*) AS count FROM agent_employments')).toBe(18);
   });
 
