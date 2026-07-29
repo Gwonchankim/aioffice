@@ -24,7 +24,7 @@ const buildPackages =
 
 const gateScripts = {
   typecheck: 'pnpm run build:packages && pnpm -r --if-present run typecheck',
-  test: 'pnpm run build:packages && pnpm -r --if-present run test',
+  test: 'pnpm run build:packages && vitest run',
   'test:coverage': 'pnpm run build:packages && vitest run --coverage',
 } as const;
 
@@ -80,6 +80,21 @@ describe('workspace root gate contract', () => {
 
     expect(scripts['test:coverage']?.match(/vitest run --coverage/g)).toHaveLength(1);
     expect(scripts['test:coverage']?.endsWith('vitest run --coverage')).toBe(true);
+
+    // CORR-M3-TEST-GATE-SINGLE-RUN-001. `vitest.config.ts` sets `root` to the
+    // workspace root and includes every package's tests, so a per-package
+    // `vitest run` collects the WHOLE suite, not that package's slice. Fanning
+    // the root gate out with `pnpm -r` therefore ran the identical suite once
+    // per workspace, concurrently, and the contention surfaced as timeouts that
+    // moved between files from run to run. The root gate runs it exactly once.
+    const rootTest = scripts['test'] ?? '';
+    expect(rootTest).not.toContain('pnpm -r');
+    // `--workspace-concurrency=1` would only serialize the duplicate runs; the
+    // duplication itself is what this contract forbids.
+    expect(rootTest).not.toContain('--workspace-concurrency');
+    expect(rootTest.match(/vitest run/g)).toHaveLength(1);
+    expect(rootTest.endsWith('vitest run')).toBe(true);
+    expect(rootTest.split(' && ')).toEqual(['pnpm run build:packages', 'vitest run']);
 
     for (const { path, types, default: defaultExport } of distExportManifests) {
       const manifest = await readManifest(path);

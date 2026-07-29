@@ -12,7 +12,7 @@
     "format:check": "prettier --check --ignore-unknown .",
     "build:packages": "pnpm --filter @orion/contracts build && pnpm --filter @orion/orchestration build && pnpm --filter @orion/agent-catalog build && pnpm --filter @orion/test-fixtures build && pnpm --filter @orion/server build",
     "typecheck": "pnpm run build:packages && pnpm -r --if-present run typecheck",
-    "test": "pnpm run build:packages && pnpm -r --if-present run test",
+    "test": "pnpm run build:packages && vitest run",
     "test:coverage": "pnpm run build:packages && vitest run --coverage",
     "build": "pnpm -r --if-present run build",
     "e2e:install": "pnpm exec playwright install chromium",
